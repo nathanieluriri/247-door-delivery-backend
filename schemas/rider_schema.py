@@ -2,19 +2,19 @@ from schemas.imports import *
 from pydantic import Field
 import time
 from security.hash import hash_password
-class UserBase(BaseModel):
+class RiderBase(BaseModel):
     # Add other fields here 
     email:EmailStr
     password:str | bytes
     pass
 
-class UserRefresh(BaseModel):
+class RiderRefresh(BaseModel):
     # Add other fields here 
     refresh_token:str
     pass
 
 
-class UserCreate(UserBase):
+class RiderCreate(RiderBase):
     # Add other fields here 
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
@@ -22,11 +22,11 @@ class UserCreate(UserBase):
     def obscure_password(self):
         self.password=hash_password(self.password)
         return self
-class UserUpdate(BaseModel):
+class RiderUpdate(BaseModel):
     # Add other fields here 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
-class UserOut(UserBase):
+class RiderOut(RiderBase):
     # Add other fields here 
     id: Optional[str] = Field(default=None, alias="_id")
     date_created: Optional[int] = None

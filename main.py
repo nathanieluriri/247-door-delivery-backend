@@ -20,6 +20,8 @@ import redis
 from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
 
+from security.encrypting_jwt import decode_jwt_token
+
 MONGO_URI = os.getenv("MONGO_URL")
 REDIS_URI = f"redis://{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/0"
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
@@ -81,6 +83,7 @@ app = FastAPI(
     
 )
 app.add_middleware(RequestTimingMiddleware)
+
 app.add_middleware(SessionMiddleware, secret_key="some-random-string")
 redis_url = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL") \
     or f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/0"
@@ -112,18 +115,30 @@ async def get_user_type(request: Request) -> tuple[str, str]:
         return user_id, user_type if user_type in RATE_LIMITS else "annonymous"
     
     
-    token = auth_header.split(" ")[1] 
-    access_token  =await get_access_tokens_no_date_check(accessToken=token)
+    token = auth_header.split(" ")[1]
+    try:
+        decoded_token =await decode_jwt_token(token=token,allow_expired=False)
+        access_token  =await get_access_tokens_no_date_check(accessToken=decoded_token.access_token)
+        user_id = access_token.userId
     
-    user_id = access_token.userId
+        user_type = access_token.role
+    except:
+        try:
+            access_token  =await get_access_tokens_no_date_check(accessToken=token)
+            user_id = access_token.userId
     
-    user_type = access_token.role
+            user_type = access_token.role
+        except:
+            ip_address = request.headers.get("X-Forwarded-For", request.client.host)
+            user_id = ip_address
+            user_type="annonymous"
+            pass
 
  
-    return user_id, user_type if user_type in RATE_LIMITS else "annonymous"
-
+    return user_id, user_type if user_type in RATE_LIMITS else "annonymous"   
 class RateLimitingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        
         user_id, user_type = await get_user_type(request)
         rate_limit_rule = RATE_LIMITS[user_type]
 
@@ -197,9 +212,12 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 
 async def test_scheduler(message):
     print(message)
+    
+   
+    
 # Simple test route
 @app.get("/",tags=["Health"], include_in_schema=False)
-def read_root():
+def root():
     run_time = datetime.now() + timedelta(seconds=20)
     scheduler.add_job(test_scheduler,"date",run_date=run_time,args=[f"test message {run_time}"],misfire_grace_time=31536000)
     
@@ -210,6 +228,8 @@ def read_root():
 # Clients
 mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
 redis_client = redis.Redis.from_url(REDIS_URI, socket_connect_timeout=2)
+
+
 # Health check route
 @app.get("/health",tags=["Health"])
 async def health_check():
@@ -329,6 +349,8 @@ async def health_check():
         detail=f"Health check completed with status: {overall_status}",
         data={"status": overall_status, "services": services}
     )
+
+
 
 
 @app.get("/health-detailed",tags=["Health"], summary="Performs a detailed health check of all integrated services")
@@ -505,12 +527,15 @@ async def health_check():
         data=data  
     )
 
+
 # --- auto-routes-start ---
 from api.v1.admin_route import router as v1_admin_route_router
- 
-from api.v1.user_route import router as v1_user_route_router
+from api.v1.driver import router as v1_driver_router
+from api.v1.rider_route import router as v1_rider_route_router
+
+
 
 app.include_router(v1_admin_route_router, prefix='/v1')
- 
-app.include_router(v1_user_route_router, prefix='/v1')
+app.include_router(v1_driver_router, prefix='/v1')
+app.include_router(v1_rider_route_router, prefix='/v1')
 # --- auto-routes-end ---

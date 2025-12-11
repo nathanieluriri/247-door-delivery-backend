@@ -146,9 +146,7 @@ async def get_access_tokens_no_date_check(accessToken: str) -> accessTokenOut | 
     except (InvalidId, TypeError):
         # If it's not a valid ObjectId, fall back to decoding the token
         token = await decode_jwt_token_without_expiration(accessToken)
-        print("hereeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-        print(token)
-
+ 
     if not token:
         print("No token found")
         return None

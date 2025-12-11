@@ -6,3 +6,11 @@ from datetime import datetime,timezone
 from typing import Optional,List,Any
 from enum import Enum
 import time
+
+class RideStatus(str, Enum):
+    arrivingToPickup="arrivingToPickup"
+    drivingToDestination="drivingToDestination"
+    canceled = "canceled"
+    pendingPayment="pendingPayment"
+    findingDriver="findingDriver"
+    

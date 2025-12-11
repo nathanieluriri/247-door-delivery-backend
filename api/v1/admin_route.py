@@ -1,7 +1,10 @@
 
-from fastapi import APIRouter, HTTPException, Query, status, Path,Depends,Body
+from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends,Body
 from typing import List,Annotated
+from core.admin_logger import log_what_admin_does
+from schemas.driver import DriverOut
 from schemas.response_schema import APIResponse
+from schemas.rider_schema import RiderOut
 from schemas.tokens_schema import accessTokenOut
 from schemas.admin_schema import (
     AdminCreate,
@@ -17,21 +20,25 @@ from services.admin_service import (
     retrieve_admins,
     authenticate_admin,
     retrieve_admin_by_admin_id,
-    update_admin,
+    update_admin_by_id,
     refresh_admin_tokens_reduce_number_of_logins,
 
 )
 from security.auth import verify_token,verify_token_to_refresh,verify_admin_token
+from services.driver_service import retrieve_driver_by_driver_id, retrieve_drivers
+from services.rider_service import retrieve_rider_by_rider_id, retrieve_riders
 router = APIRouter(prefix="/admins", tags=["Admins"])
 
+ 
 @router.get(
     "/{start}/{stop}", 
     response_model=APIResponse[List[AdminOut]],
     response_model_exclude_none=True,
     response_model_exclude={"data": {"__all__": {"password"}}},
-    dependencies=[Depends(verify_admin_token)]
+    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)]
 )
 async def list_admins(
+    
     # Use Path and Query for explicit documentation/validation of GET parameters
     start: Annotated[
         int,
@@ -40,7 +47,7 @@ async def list_admins(
     stop: Annotated[
         int, 
         Path(gt=0, description="The ending index for the list of admins (limit).")
-    ] 
+    ]
 ):
     """
     **ADMIN ONLY:** Retrieves a paginated list of all registered admins.
@@ -66,9 +73,9 @@ async def list_admins(
 
 
 @router.get(
-    "/me", 
+    "/profile", 
     response_model=APIResponse[AdminOut],
-    dependencies=[Depends(verify_admin_token)],
+    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],
     response_model_exclude_none=True,
     response_model_exclude={"data": {"password"}},
 )
@@ -90,26 +97,9 @@ async def get_my_admin(
 
 
 
-@router.post("/signup",response_model_exclude_none=True, response_model_exclude={"data": {"password"}},response_model=APIResponse[AdminOut])
+@router.post("/signup",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True, response_model_exclude={"data": {"password"}},response_model=APIResponse[AdminOut])
 async def signup_new_admin(
-    
-    admin_data: Annotated[
-        AdminBase,
-        Body(
-            openapi_examples={
-                "admin Signup": {
-                    "summary": "Admin Signup Example",
-                    "description": "Example payload for a **Admin** registering on the platform.",
-                    "value": {
-                        "full_name": "Admin Base",
-                        "password": "securepassword123",
-                        "email": "admin@secure.com"
-                    },
-                },
-              
-            }
-        ),
-    ],
+    admin_data:AdminBase,
     token: accessTokenOut = Depends(verify_admin_token),
 ):
  
@@ -123,37 +113,9 @@ async def signup_new_admin(
 
 @router.post("/login",response_model_exclude={"data": {"password"}}, response_model_exclude_none=True,response_model=APIResponse[AdminOut])
 async def login_admin(
-    admin_data: Annotated[
-        AdminLogin,
-        Body(
-            openapi_examples={
-                "successful_login": {
-                    "summary": "Successful Login",
-                    "description": "Standard payload for a successful authentication attempt.",
-                    "value": {
-                        "email": "admin@registered.com",
-                        "password": "securepassword123",
-                    },
-                },
-                "unauthorized_login": {
-                    "summary": "Unauthorized Login (Wrong Password)",
-                    "description": "Payload that would result in a **401 Unauthorized** error due to incorrect credentials.",
-                    "value": {
-                        "email": "admin@registered.com",
-                        "password": "wrongpassword999", # Intentionally incorrect
-                    },
-                },
-                "invalid_email_format": {
-                    "summary": "Invalid Email Format",
-                    "description": "Payload that would trigger a **422 Unprocessable Entity** error due to Pydantic validation failure (not a valid email address).",
-                    "value": {
-                        "email": "not-an-email-address", # Pydantic will flag this
-                        "password": "anypassword",
-                    },
-                },
-            }
-        ),
-    ]
+    
+    admin_data:AdminLogin,
+
 ):
     """
     Authenticates a admin with the provided email and password.
@@ -221,8 +183,7 @@ async def refresh_admin_tokens(
 
     Requires an **expired access token** in the Authorization header and a **valid refresh token** in the body.
     """
-    print("itemsssssssssssssssssssssssssssssssssssssssssss")
-    print(token)
+ 
     items = await refresh_admin_tokens_reduce_number_of_logins(
         admin_refresh_data=admin_data,
         expired_access_token=token.accesstoken
@@ -234,34 +195,10 @@ async def refresh_admin_tokens(
     return APIResponse(status_code=200, data=items, detail="admins items fetched")
 
 
-@router.delete("/account", dependencies=[Depends(verify_admin_token)], response_model_exclude_none=True)
+@router.delete("/account",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)], response_model_exclude_none=True)
 async def delete_admin_account(
     token: accessTokenOut = Depends(verify_token),
-    # Use Body to host the openapi_examples, even if the payload is empty
-    # We use a simple dictionary here since there is no Pydantic model for the body
-    _body: Annotated[
-        dict,
-        Body(
-            openapi_examples={
-                "successful_deletion": {
-                    "summary": "Successful Account Deletion",
-                    "description": (
-                        "A successful request **requires no body** and relies entirely on a **valid, non-expired Access Token** "
-                        "in the `Authorization: Bearer <token>` header to identify the admin."
-                    ),
-                    "value": {},  # Empty body
-                },
-                "unauthorized_deletion": {
-                    "summary": "Unauthorized Deletion (Invalid Token)",
-                    "description": (
-                        "This scenario represents a request where the **Access Token is missing, expired, or invalid**. "
-                        "The `verify_token` dependency should intercept this and return a **401 Unauthorized**."
-                    ),
-                    "value": {},  # Empty body
-                },
-            }
-        ),
-    ] = {}, # Default empty dictionary for the body
+ 
 ):
     """
     Deletes the account associated with the provided access token.
@@ -274,3 +211,72 @@ async def delete_admin_account(
     # The 'result' is assumed to be a standard FastAPI response object or a dict/model 
     # that is automatically converted to a response.
     return result
+
+
+@router.patch("/profile",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
+async def update_driver_profile(admin_details:AdminUpdate,token:accessTokenOut = Depends(verify_admin_token)):
+    admin = await update_admin_by_id(admin_id=token.userId,admin_data=admin_details,)
+    return APIResponse(data=admin,status_code=200,detail="Succesfully updated profile")
+
+# ---------------------------------------------------
+# --------------- DRIVER MANAGEMENT -----------------
+# ---------------------------------------------------
+
+@router.get("/drivers/",response_model_exclude={"data": {"__all__": {"password"}}} ,response_model_exclude_none=True,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
+async def list_of_drivers(start:int= 0, stop:int=100,token:accessTokenOut = Depends(verify_admin_token)):
+    items = await retrieve_drivers(start=start,stop=stop)
+    return APIResponse(status_code=200, data=items, detail="Fetched successfully")
+
+@router.get("/driver/{driver_id}", response_model_exclude={"data": {"password"}} ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def get_a_particular_driver_details(driver_id:str,token:accessTokenOut = Depends(verify_admin_token)):
+    try: 
+        items = await retrieve_driver_by_driver_id(id=driver_id)
+        return APIResponse(status_code=200, data=items, detail="users items fetched")
+    except Exception as e:
+        raise HTTPException(status_code=500,detail=f"{e}")
+    
+@router.patch("/ban/driver/{driver_id}", response_model_exclude={"data": {"password"}} ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def ban_a_driver_from_using_the_app(driver_id:str,token:accessTokenOut = Depends(verify_admin_token)):
+    # TODO: IMPLEMENT THIS ROUTE FUNCTION
+    pass
+    
+# --------------------------------------------------
+# --------------- RIDER MANAGEMENT -----------------
+# --------------------------------------------------
+
+
+
+@router.get("/riders/",response_model_exclude={"data": {"__all__": {"password"}}} ,response_model_exclude_none=True,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
+async def list_riders(start:int= 0, stop:int=100,token:accessTokenOut = Depends(verify_admin_token)):
+    items = await retrieve_riders(start=0,stop=100)
+    return APIResponse(status_code=200, data=items, detail="Fetched successfully")
+
+
+
+@router.get("/rider/{riderId}", response_model_exclude={"data": {"password"}} ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def get_a_particular_riders_details(riderId:str,token:accessTokenOut = Depends(verify_admin_token)):
+    items = await retrieve_rider_by_rider_id(id=riderId)
+    return APIResponse(status_code=200, data=items, detail="users items fetched")
+
+ 
+@router.patch("/ban/rider/{riderId}", response_model_exclude={"data": {"password"}},    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def ban_a_rider_from_using_the_app(riderId:str,token:accessTokenOut = Depends(verify_admin_token)):
+    # TODO: IMPLEMENT THIS ROUTE FUNCTION    
+    pass
+
+
+
+# --------------------------------------------------
+# --------------- INVOICE MANAGEMENT ---------------
+# --------------------------------------------------
+
+@router.post("/invoice/{rideId}", response_model_exclude={"data": {"password"}},    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def generate_an_invoice_for_a_ride_for_mainly_business_clients(rideId:str,token:accessTokenOut = Depends(verify_admin_token)):
+    # TODO: IMPLEMENT THIS ROUTE FUNCTION    
+    pass
+
+
+@router.get("/invoice/{rideId}", response_model_exclude={"data": {"password"}},    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def get_an_update_on_the_invoice_for_the_ride(rideId:str,token:accessTokenOut = Depends(verify_admin_token)):
+    # TODO: IMPLEMENT THIS ROUTE FUNCTION    
+    pass

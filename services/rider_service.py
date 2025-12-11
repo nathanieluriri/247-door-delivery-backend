@@ -3,14 +3,14 @@ from bson import ObjectId
 from fastapi import HTTPException
 from typing import List
 
-from repositories.user_repo import (
-    create_user,
-    get_user,
-    get_users,
-    update_user,
-    delete_user,
+from repositories.rider_repo import (
+    create_rider,
+    get_rider,
+    get_riders,
+    update_rider,
+    delete_rider,
 )
-from schemas.user_schema import UserCreate, UserUpdate, UserOut,UserBase,UserRefresh
+from schemas.rider_schema import RiderCreate, RiderUpdate, RiderOut,RiderBase,RiderRefresh
 from security.hash import check_password
 from security.encrypting_jwt import create_jwt_member_token
 from repositories.tokens_repo import add_refresh_tokens, add_access_tokens, accessTokenCreate,accessTokenOut,refreshTokenCreate
@@ -31,26 +31,30 @@ oauth.register(
     server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
     client_kwargs={'scope': 'openid email profile'},
 )
-async def add_user(user_data: UserCreate) -> UserOut:
-    """adds an entry of UserCreate to the database and returns an object
+
+# -----------------------------------
+# USER MANAGEMENT LOGIC
+# -----------------------------------
+async def add_rider(user_data: RiderCreate) -> RiderOut:
+    """adds an entry of RiderCreate to the database and returns an object
 
     Returns:
-        _type_: UserOut
+        _type_: RiderOut
     """
-    user =  await get_user(filter_dict={"email":user_data.email})
+    user =  await get_rider(filter_dict={"email":user_data.email})
     if user==None:
-        new_user= await create_user(user_data)
-        access_token = await add_access_tokens(token_data=accessTokenCreate(userId=new_user.id))
-        refresh_token  = await add_refresh_tokens(token_data=refreshTokenCreate(userId=new_user.id,previousAccessToken=access_token.accesstoken))
-        new_user.password=""
-        new_user.access_token= access_token.accesstoken 
-        new_user.refresh_token = refresh_token.refreshtoken
-        return new_user
+        new_rider= await create_rider(user_data)
+        access_token = await add_access_tokens(token_data=accessTokenCreate(userId=new_rider.id))
+        refresh_token  = await add_refresh_tokens(token_data=refreshTokenCreate(userId=new_rider.id,previousAccessToken=access_token.accesstoken))
+        new_rider.password=""
+        new_rider.access_token= access_token.accesstoken 
+        new_rider.refresh_token = refresh_token.refreshtoken
+        return new_rider
     else:
-        raise HTTPException(status_code=409,detail="User Already exists")
+        raise HTTPException(status_code=409,detail="Rider Already exists")
 
-async def authenticate_user(user_data:UserBase )->UserOut:
-    user = await get_user(filter_dict={"email":user_data.email})
+async def authenticate_rider(user_data:RiderBase )->RiderOut:
+    user = await get_rider(filter_dict={"email":user_data.email})
 
     if user != None:
         if check_password(password=user_data.password,hashed=user.password ):
@@ -63,13 +67,13 @@ async def authenticate_user(user_data:UserBase )->UserOut:
         else:
             raise HTTPException(status_code=401, detail="Unathorized, Invalid Login credentials")
     else:
-        raise HTTPException(status_code=404,detail="User not found")
+        raise HTTPException(status_code=404,detail="Rider not found")
 
-async def refresh_user_tokens_reduce_number_of_logins(user_refresh_data:UserRefresh,expired_access_token):
+async def refresh_rider_tokens_reduce_number_of_logins(user_refresh_data:RiderRefresh,expired_access_token):
     refreshObj= await get_refresh_tokens(user_refresh_data.refresh_token)
     if refreshObj:
         if refreshObj.previousAccessToken==expired_access_token:
-            user = await get_user(filter_dict={"_id":ObjectId(refreshObj.userId)})
+            user = await get_rider(filter_dict={"_id":ObjectId(refreshObj.userId)})
             
             if user!= None:
                     access_token = await add_access_tokens(token_data=accessTokenCreate(userId=user.id))
@@ -85,73 +89,78 @@ async def refresh_user_tokens_reduce_number_of_logins(user_refresh_data:UserRefr
   
     raise HTTPException(status_code=404,detail="Invalid refresh token ")  
         
-async def remove_user(user_id: str):
-    """deletes a field from the database and removes UserCreateobject 
+async def remove_rider(user_id: str):
+    """deletes a field from the database and removes RiderCreateobject 
 
     Raises:
         HTTPException 400: Invalid user ID format
-        HTTPException 404:  User not found
+        HTTPException 404:  Rider not found
     """
     if not ObjectId.is_valid(user_id):
         raise HTTPException(status_code=400, detail="Invalid user ID format")
 
     filter_dict = {"_id": ObjectId(user_id)}
-    result = await delete_user(filter_dict)
+    result = await delete_rider(filter_dict)
     await delete_all_tokens_with_user_id(userId=user_id)
 
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Rider not found")
 
 
-async def retrieve_user_by_user_id(id: str) -> UserOut:
+async def retrieve_rider_by_rider_id(id: str) -> RiderOut:
     """Retrieves user object based specific Id 
 
     Raises:
-        HTTPException 404(not found): if  User not found in the db
+        HTTPException 404(not found): if  Rider not found in the db
         HTTPException 400(bad request): if  Invalid user ID format
 
     Returns:
-        _type_: UserOut
+        _type_: RiderOut
     """
     if not ObjectId.is_valid(id):
         raise HTTPException(status_code=400, detail="Invalid user ID format")
 
     filter_dict = {"_id": ObjectId(id)}
-    result = await get_user(filter_dict)
+    result = await get_rider(filter_dict)
 
     if not result:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Rider not found")
 
     return result
 
 
-async def retrieve_users(start=0,stop=100) -> List[UserOut]:
-    """Retrieves UserOut Objects in a list
+async def retrieve_riders(start=0,stop=100) -> List[RiderOut]:
+    """Retrieves RiderOut Objects in a list
 
     Returns:
-        _type_: UserOut
+        _type_: RiderOut
     """
-    return await get_users(start=start,stop=stop)
+    return await get_riders(start=start,stop=stop)
 
 
-async def update_user_by_id(user_id: str, user_data: UserUpdate) -> UserOut:
+async def update_rider_by_id(user_id: str, user_data: RiderUpdate) -> RiderOut:
     """_summary_
 
     Raises:
-        HTTPException 404(not found): if User not found or update failed
+        HTTPException 404(not found): if Rider not found or update failed
         HTTPException 400(not found): Invalid user ID format
 
     Returns:
-        _type_: UserOut
+        _type_: RiderOut
     """
     if not ObjectId.is_valid(user_id):
         raise HTTPException(status_code=400, detail="Invalid user ID format")
 
     filter_dict = {"_id": ObjectId(user_id)}
-    result = await update_user(filter_dict, user_data)
+    result = await update_rider(filter_dict, user_data)
 
     if not result:
-        raise HTTPException(status_code=404, detail="User not found or update failed")
+        raise HTTPException(status_code=404, detail="Rider not found or update failed")
 
     return result
 
+
+
+# -----------------------------------
+# BOOKING LOGIC
+# -----------------------------------
