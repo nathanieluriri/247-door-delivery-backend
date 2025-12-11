@@ -119,10 +119,11 @@ async def view_driver_rating(driverId:str):
 
 @router.post("/rate/driver/{rideId}", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)])
 async def rate_driver_after_ride(rating_data:RatingBase):
+    
     # TODO: ADD USER VERIFICATION IN THE SERVICE FUNCTION
+    
     rider_rating = RatingCreate(**rating_data.model_dump())
     rating = add_rating(rating_data=rider_rating)
-    
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Driver")
 
 
