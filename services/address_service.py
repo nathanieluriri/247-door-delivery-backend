@@ -29,7 +29,7 @@ async def add_address(address_data: AddressCreate) -> AddressOut:
     return await create_address(address_data)
 
 
-async def remove_address(address_id: str):
+async def remove_address(address_id: str,user_id:str):
     """deletes a field from the database and removes AddressCreateobject 
 
     Raises:
@@ -38,8 +38,10 @@ async def remove_address(address_id: str):
     """
     if not ObjectId.is_valid(address_id):
         raise HTTPException(status_code=400, detail="Invalid address ID format")
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-    filter_dict = {"_id": ObjectId(address_id)}
+    filter_dict = {"_id": ObjectId(address_id),"userId":user_id}
     result = await delete_address(filter_dict)
 
     if result.deleted_count == 0:
@@ -101,7 +103,7 @@ async def retrieve_addresss(start=0,stop=100) -> List[AddressOut]:
     return await get_addresss(start=start,stop=stop)
 
 
-async def update_address_by_id(address_id: str, address_data: AddressUpdate) -> AddressOut:
+async def update_address_by_id(address_id: str, address_data: AddressUpdate,user_id:str) -> AddressOut:
     """updates an entry of address in the database
 
     Raises:
@@ -113,8 +115,10 @@ async def update_address_by_id(address_id: str, address_data: AddressUpdate) -> 
     """
     if not ObjectId.is_valid(address_id):
         raise HTTPException(status_code=400, detail="Invalid address ID format")
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-    filter_dict = {"_id": ObjectId(address_id)}
+    filter_dict = {"_id": ObjectId(address_id),"userId":user_id}
     result = await update_address(filter_dict, address_data)
 
     if not result:

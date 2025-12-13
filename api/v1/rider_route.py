@@ -117,12 +117,12 @@ async def view_driver_rating(driverId:str):
     rating = await retrieve_rating_by_user_id(user_id=driverId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Retrieved User Rating")
 
-@router.post("/rate/driver/{rideId}", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)])
-async def rate_driver_after_ride(rating_data:RatingBase):
+@router.post("/rate/driver", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)])
+async def rate_driver_after_ride(rating_data:RatingBase,token:accessTokenOut = Depends(verify_token_rider_role)):
     
-    # TODO: ADD USER VERIFICATION IN THE SERVICE FUNCTION
+
     
-    rider_rating = RatingCreate(**rating_data.model_dump())
+    rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
     rating = add_rating(rating_data=rider_rating)
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Driver")
 
@@ -140,25 +140,25 @@ async def view_all_previous_addresses_created_by_user(token:accessTokenOut = Dep
     return APIResponse(data=address,status_code=200,detail="Successfully retrieved Addresses")
 
 @router.post("/address", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[AddressOut])
-async def create_new_address_for_a_user(address_data:AddressBase):
-    # TODO: ADD USER 
-    new_address_data = AddressCreate(**address.model_dump())
+async def create_new_address_for_a_user(address_data:AddressBase,token:accessTokenOut = Depends(verify_token_rider_role)):
+ 
+    new_address_data = AddressCreate(**address.model_dump(),userId=token.userId)
     address = await add_address(address_data=new_address_data)
     return APIResponse(data = address,status_code=200,detail="Successfully created new Address")
 
 
 @router.delete("/address/{addressId}", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[Literal[True]])
-async def delete_address_detials_using_address_id(addressId:str):
-    # TODO: ADD USER VERIFICATION IN THE SERVICE FUNCTION
-    removed_address = await remove_address(address_id=addressId)
+async def delete_address_detials_using_address_id(addressId:str,token:accessTokenOut = Depends(verify_token_rider_role)):
+    
+    removed_address = await remove_address(address_id=addressId,user_id=token.userId)
     return APIResponse(data=removed_address,detail="Successfully deleted Address",status_code= 200)
 
 
 
 @router.patch("/address/{addressId}", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[AddressOut])
-async def update_address_label(addressId:str,address_data:AddressUpdate):
-    # TODO: ADD USER VERIFICATION IN THE SERVICE FUNCTION
-    address = await update_address_by_id(address_id=addressId,address_data=address_data)
+async def update_address_label(addressId:str,address_data:AddressUpdate,token:accessTokenOut = Depends(verify_token_rider_role)):
+     
+    address = await update_address_by_id(address_id=addressId,address_data=address_data,user_id=token.userId)
     return APIResponse(data=address,status_code=200,detail = "Successfully updated addres")
 
 

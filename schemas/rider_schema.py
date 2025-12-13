@@ -15,7 +15,11 @@ class RiderRefresh(BaseModel):
 
 
 class RiderCreate(RiderBase):
-    # Add other fields here 
+    # Add other fields here
+    firstName:Optional[str]=''
+    lastName:Optional[str]='' 
+    accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
+ 
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
     @model_validator(mode='after')
@@ -23,11 +27,17 @@ class RiderCreate(RiderBase):
         self.password=hash_password(self.password)
         return self
 class RiderUpdate(BaseModel):
-    # Add other fields here 
+    # Add other fields here
+    firstName:Optional[str]=None
+    lastName:Optional[str]=None
+    accountStatus:Optional[AccountStatus]=None 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
 class RiderOut(RiderBase):
     # Add other fields here 
+    firstName:Optional[str]=''
+    lastName:Optional[str]='' 
+    accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     id: Optional[str] = Field(default=None, alias="_id")
     date_created: Optional[int] = None
     last_updated: Optional[int] = None

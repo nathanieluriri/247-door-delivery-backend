@@ -163,10 +163,11 @@ async def update_ride_by_id(ride_id: str, ride_data: RideUpdate,rider_id:str=Non
         filter_dict["driverId"]=driver_id
     
     filter_dict["_id"] = ObjectId(ride_id)
-    
+    # CANCEL OF RIDE CASES
     if (ride.rideStatus==RideStatus.findingDriver or ride.rideStatus==RideStatus.pendingPayment) and (ride_data.rideStatus==RideStatus.canceled):
         # Only case that allows the ride to be canceled
         result = await update_ride(filter_dict, ride_data)
+        # TODO:depending on the case there should be a way to initiate refunds for each ride
 
     if not result:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")

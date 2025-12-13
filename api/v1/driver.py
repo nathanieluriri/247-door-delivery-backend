@@ -135,13 +135,15 @@ async def view_rider_rating(riderId:str):
     rating = await retrieve_rating_by_user_id(user_id=riderId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Retrieved User Rating")
 
-@router.post("/rate",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
-async def rate_rider_after_ride(rating_data:RatingBase):
+@router.post("/rate/rider", response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
+async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = Depends(verify_token_driver_role)):
     
-    rider_rating = RatingCreate(**rating_data.model_dump())
+
+    
+    rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
     rating = add_rating(rating_data=rider_rating)
-    
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Rider")
+
 
 
 # -------------------------------
@@ -152,3 +154,5 @@ async def rate_rider_after_ride(rating_data:RatingBase):
 async def ride_history(driverId:str):
     # TODO: IMPLEMENT THIS ROUTE
     pass
+
+# TODO: Update password routes

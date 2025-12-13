@@ -27,6 +27,7 @@ async def add_rating(rating_data: RatingCreate) -> RatingOut:
     Returns:
         _type_: RatingOut
     """
+    # TODO: Confirm if a ride id exists before letting a rating go through
     return await create_rating(rating_data)
 
 

@@ -13,12 +13,12 @@ import time
 
 class RatingBase(BaseModel):
     rideId: str
-    userId: str      # the user being rated
-    raterId: str     #  the user who gave the rating
+    userId: str     #  the user who is being rated
     rating: int = Field(..., ge=1, le=5)
 
 class RatingCreate(RatingBase):
-    # Add other fields here 
+    # Add other fields here
+    raterId: str 
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 

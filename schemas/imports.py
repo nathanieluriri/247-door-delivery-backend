@@ -14,3 +14,11 @@ class RideStatus(str, Enum):
     pendingPayment="pendingPayment"
     findingDriver="findingDriver"
     
+    
+class AccountStatus(str, Enum):
+    ACTIVE="active"
+    PENDING_VERIFICATION="pendingVerification"
+    SUSPENDED = "suspended"
+    BANNED="banned"
+    DEACTIVATED="deactivated"
+    

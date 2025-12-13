@@ -11,12 +11,17 @@ from schemas.imports import *
 from pydantic import AliasChoices, Field
 import time
 
+from schemas.place import Location
+
 class AddressBase(BaseModel):
-    # Add other fields here 
-    pass
+    # Add other fields here
+    placeId:str
+    label:str 
+    
 
 class AddressCreate(AddressBase):
-    # Add other fields here 
+    # Add other fields here
+    userId:str 
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
@@ -26,6 +31,7 @@ class AddressUpdate(BaseModel):
 
 class AddressOut(AddressBase):
     # Add other fields here 
+    userId:str
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

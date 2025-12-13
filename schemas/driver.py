@@ -11,22 +11,44 @@ from schemas.imports import *
 from pydantic import AliasChoices, Field
 import time
 
+from security.hash import hash_password
+
 class DriverBase(BaseModel):
     # Add other fields here 
-    pass
+    email:EmailStr
+    password:str | bytes
 
 class DriverCreate(DriverBase):
-    # Add other fields here 
+    # Add other fields here
+    firstName:Optional[str]=''
+    lastName:Optional[str]='' 
+    accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+    @model_validator(mode='after')
+    def obscure_password(self):
+        self.password=hash_password(self.password)
+        return self
+    
+    
+class DriverRefresh(BaseModel):
+    # Add other fields here 
+    refresh_token:str
+    pass
+
 
 class DriverUpdate(BaseModel):
     # Add other fields here 
-    
+    firstName:Optional[str]=None
+    lastName:Optional[str]=None
+    accountStatus:Optional[AccountStatus]=None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
 class DriverOut(DriverBase):
     # Add other fields here 
+    firstName:Optional[str]=''
+    lastName:Optional[str]='' 
+    accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),
@@ -42,7 +64,8 @@ class DriverOut(DriverBase):
         validation_alias=AliasChoices("last_updated", "lastUpdated"),
         serialization_alias="lastUpdated",
     )
-    
+    refresh_token: Optional[str] =None
+    access_token:Optional[str]=None
     @model_validator(mode="before")
     @classmethod
     def convert_objectid(cls, values):
@@ -65,4 +88,4 @@ class DriverRefresh(BaseModel):
     # Add other fields here 
     
     refresh_token:str
-    pass
+     
