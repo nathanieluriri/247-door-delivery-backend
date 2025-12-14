@@ -23,6 +23,26 @@ class AccountStatus(str, Enum):
     BANNED="banned"
     DEACTIVATED="deactivated"
     
+ALLOWED_ACCOUNT_STATUS_TRANSITIONS: dict[AccountStatus, set[AccountStatus]] = {
+    AccountStatus.PENDING_VERIFICATION: {
+        AccountStatus.ACTIVE,
+        AccountStatus.BANNED,
+        AccountStatus.SUSPENDED,
+    },
+    AccountStatus.ACTIVE: {
+        AccountStatus.SUSPENDED,
+        AccountStatus.BANNED,
+        AccountStatus.DEACTIVATED,
+    },
+    AccountStatus.SUSPENDED: {
+        AccountStatus.ACTIVE,
+        AccountStatus.BANNED,
+    },
+    AccountStatus.BANNED: set(),  # irreversible (admin decision)
+    AccountStatus.DEACTIVATED: {
+        AccountStatus.ACTIVE,
+    },
+}
 
     
 class InvoiceData(BaseModel):

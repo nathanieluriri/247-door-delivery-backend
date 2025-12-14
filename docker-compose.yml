@@ -46,10 +46,8 @@ services:
       - mongo_data:/data/db
 
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:7.2.0-v9
     restart: always
-    command: ["redis-server", "--appendonly", "yes"]   # 👈 force primary, no replica
-    
     volumes:
       - redis_data:/data
   flower:

@@ -29,6 +29,7 @@ from services.admin_service import (
 from services.driver_service import (
     update_driver_by_id,
     DriverUpdate,
+    update_driver_by_id_admin_func,
     
 )
 from services.ride_service import retrieve_ride_by_ride_id, update_ride_by_id, update_ride_by_id_admin_func
@@ -252,8 +253,21 @@ async def get_a_particular_driver_details(driverId:str,token:accessTokenOut = De
 @router.patch("/ban/driver/{driverId}", response_model_exclude={"data": {"password"}} , response_model=APIResponse[DriverOut] ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
 async def ban_a_driver_from_using_the_app(driverId:str,token:accessTokenOut = Depends(verify_admin_token)):
     driver_data = DriverUpdate(accountStatus=AccountStatus.BANNED)
-    update =await update_driver_by_id(driver_id=driverId,driver_data=driver_data)
+    update =await update_driver_by_id_admin_func(driver_id=driverId,driver_data=driver_data)
     return APIResponse(status_code=200,data=update,detail="Successfully banned driver from the app")
+
+
+# TODO: Create a reusable dependency that checks a user's account status.
+# - Use Redis to cache the account status.
+# - If the account is active, allow the operation; otherwise, block it.
+# - Apply this dependency only to specific endpoints (not globally).
+# - Cache results to avoid unnecessary database queries.
+
+@router.patch("/approve/driver/{driverId}", response_model_exclude={"data": {"password"}} , response_model=APIResponse[DriverOut] ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def approve_a_driver_to_use_the_driver_app(driverId:str,token:accessTokenOut = Depends(verify_admin_token)):
+    driver_data = DriverUpdate(accountStatus=AccountStatus.ACTIVE)
+    update =await update_driver_by_id_admin_func(driver_id=driverId,driver_data=driver_data)
+    return APIResponse(status_code=200,data=update,detail="Successfully Approved this driver so they can use the app")
     
 # --------------------------------------------------
 # --------------- RIDER MANAGEMENT -----------------
@@ -279,6 +293,23 @@ async def ban_a_rider_from_using_the_app(riderId:str,token:accessTokenOut = Depe
     rider_data = DriverUpdate(accountStatus=AccountStatus.BANNED)
     update =await update_rider_by_id(user_id=riderId,user_data=rider_data)
     return APIResponse(status_code=200,data=update,detail="Successfully banned Rider from the app")
+
+# --------------------------------------------------
+# --------------- RIDE MANAGEMENT ------------------
+# --------------------------------------------------
+
+
+# TODO: Implement endpoints to manage ride data.
+# - a create ride endpoint.
+# - a cancel ride endpoint.
+
+
+
+
+
+
+
+
 
 
 
@@ -309,4 +340,6 @@ async def get_an_update_on_the_invoice_for_the_ride(rideId:str,token:accessToken
         HTTPException(status_code=404,detail="This ride doesn't have an invoice probably not initiated by the admin")
 
 
-# TODO: WEBHOOK FOR RECEIVING INVOICE DATA UPDATE SHOULD BE HERE WHEN AN INVOICE IS PAID IT SHOULD UPDATE THE INVOICE DATA OBJECT IN A RIDE
+# TODO: Implement a webhook to receive invoice payment updates.
+# - Trigger when an invoice is marked as paid.
+# - Update the corresponding invoice data within the related ride object.

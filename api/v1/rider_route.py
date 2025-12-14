@@ -282,5 +282,14 @@ async def generate_public_ride_sharing_link(rideId:str):
     pass
 
 
-# TODO: WEBHOOK FOR RECEIVING succesful payments to update a ride from pendingPaymen
-# TODO: TO UPDATE IT TO FINDING DRIVER AND PAYMENTSTATUS=TRUE
+# TODO: WEBHOOK FOR RECEIVING succesful payments 
+# - if a payment is successful update a ride from pendingPayment to findingDriver
+# - and add receipt url, paymentIntent and the rest to the ride body then use a background task to initiate the update
+# - create a different outObject to validate for returning reciept and payment related data  
+
+
+# TODO: Create a reusable dependency that checks a user's account status.
+# - Use Redis to cache the account status.
+# - If the account is active, allow the operation; otherwise, block it.
+# - Apply this dependency only to specific endpoints (not globally).
+# - Cache results to avoid unnecessary database queries.

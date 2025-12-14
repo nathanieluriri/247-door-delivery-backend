@@ -157,3 +157,11 @@ async def ride_history(token:accessTokenOut = Depends(verify_token_driver_role))
     return APIResponse(status_code=200,data= rides, detail="Successfully Retrieved Ride history for driver")
 
 # TODO: Update password routes
+
+
+
+# TODO: Create a reusable dependency that checks a user's account status.
+# - Use Redis to cache the account status.
+# - If the account is active, allow the operation; otherwise, block it.
+# - Apply this dependency only to specific endpoints (not globally).
+# - Cache results to avoid unnecessary database queries.
