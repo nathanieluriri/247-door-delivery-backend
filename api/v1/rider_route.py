@@ -23,7 +23,7 @@ from schemas.rider_schema import (
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
 from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details
 from services.rating_service import add_rating, retrieve_rating_by_user_id
-from services.ride_service import add_ride, retrieve_ride_by_user_id, retrieve_ride_by_user_id_and_ride_id, update_ride_by_id
+from services.ride_service import add_ride, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, update_ride_by_id
 from services.rider_service import (
     add_rider,
     remove_rider,
@@ -142,7 +142,7 @@ async def view_all_previous_addresses_created_by_user(token:accessTokenOut = Dep
 @router.post("/address", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[AddressOut])
 async def create_new_address_for_a_user(address_data:AddressBase,token:accessTokenOut = Depends(verify_token_rider_role)):
  
-    new_address_data = AddressCreate(**address.model_dump(),userId=token.userId)
+    new_address_data = AddressCreate(**address_data.model_dump(),userId=token.userId)
     address = await add_address(address_data=new_address_data)
     return APIResponse(data = address,status_code=200,detail="Successfully created new Address")
 
@@ -225,7 +225,7 @@ async def calculate_fare_price(data:FareBetweenPlacesCalculationRequest):
 
 @router.get("/ride/history" ,response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[List[RideOut]])
 async def ride_history(token:accessTokenOut = Depends(verify_token_rider_role)):
-    rides = await retrieve_ride_by_user_id(user_id=token.userId)
+    rides = await retrieve_rides_by_user_id(user_id=token.userId)
     return APIResponse(data = rides, status_code=200, detail = "Successfully retrieved Ride history")
 
  
@@ -272,7 +272,7 @@ async def cancel_a_requested_ride_before_ride_has_begun(rideId:str,token:accessT
 @router.get("/ride/{rideId}",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[RideOut])
 async def view_ride_details(rideId:str,token:accessTokenOut = Depends(verify_token_rider_role)):
     
-    ride=await retrieve_ride_by_user_id_and_ride_id(user_id=token.userId,ride_id=rideId)
+    ride=await retrieve_rides_by_user_id_and_ride_id(user_id=token.userId,ride_id=rideId)
     return APIResponse(data =ride ,status_code=200,detail="Successfully Retrieved ride") 
 
 
@@ -282,3 +282,5 @@ async def generate_public_ride_sharing_link(rideId:str):
     pass
 
 
+# TODO: WEBHOOK FOR RECEIVING succesful payments to update a ride from pendingPaymen
+# TODO: TO UPDATE IT TO FINDING DRIVER AND PAYMENTSTATUS=TRUE

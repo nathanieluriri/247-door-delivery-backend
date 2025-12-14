@@ -25,6 +25,7 @@ from services.driver_service import (
 )
 from security.auth import verify_any_token,verify_token_to_refresh,verify_token_driver_role
 from services.rating_service import add_rating, retrieve_rating_by_user_id
+from services.ride_service import retrieve_rides_by_driver_id
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
 
 # --- Step 1: Redirect user to Google login ---
@@ -151,8 +152,8 @@ async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = De
 # -------------------------------
 
 @router.get("/ride/history",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
-async def ride_history(driverId:str):
-    # TODO: IMPLEMENT THIS ROUTE
-    pass
+async def ride_history(token:accessTokenOut = Depends(verify_token_driver_role)):
+    rides = await retrieve_rides_by_driver_id(driver_id=token.userId)
+    return APIResponse(status_code=200,data= rides, detail="Successfully Retrieved Ride history for driver")
 
 # TODO: Update password routes

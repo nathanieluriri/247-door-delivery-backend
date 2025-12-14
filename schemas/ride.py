@@ -34,6 +34,7 @@ class RideCreate(RideBase):
 
 class RideUpdate(BaseModel):
     # Add other fields here
+    invoiceData:Optional[InvoiceData]=None
     driverId:Optional[str]=None
     rideStatus:Optional[RideStatus]=None 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
@@ -44,6 +45,7 @@ class RideOut(RideBase):
     rideStatus:Optional[RideStatus]=RideStatus.pendingPayment
     driverId:Optional[str]=None
     userId:str
+    invoiceData:Optional[InvoiceData]=None
     origin:Location
     paymentLink:Optional[str]=None
     map: DeliveryRouteResponse

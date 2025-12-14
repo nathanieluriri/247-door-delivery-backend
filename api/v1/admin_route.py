@@ -2,8 +2,10 @@
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends,Body
 from typing import List,Annotated
 from core.admin_logger import log_what_admin_does
+from core.payements import PaymentService, get_payment_service
 from schemas.driver import DriverOut
 from schemas.response_schema import APIResponse
+from schemas.ride import RideUpdate
 from schemas.rider_schema import RiderOut
 from schemas.tokens_schema import accessTokenOut
 from schemas.admin_schema import (
@@ -24,6 +26,18 @@ from services.admin_service import (
     refresh_admin_tokens_reduce_number_of_logins,
 
 )
+from services.driver_service import (
+    update_driver_by_id,
+    DriverUpdate,
+    
+)
+from services.ride_service import retrieve_ride_by_ride_id, update_ride_by_id, update_ride_by_id_admin_func
+from services.rider_service import (
+    update_rider_by_id,
+    RiderUpdate,
+    
+)
+from schemas.imports import *
 from security.auth import verify_token,verify_token_to_refresh,verify_admin_token
 from services.driver_service import retrieve_driver_by_driver_id, retrieve_drivers
 from services.rider_service import retrieve_rider_by_rider_id, retrieve_riders
@@ -222,23 +236,24 @@ async def update_driver_profile(admin_details:AdminUpdate,token:accessTokenOut =
 # --------------- DRIVER MANAGEMENT -----------------
 # ---------------------------------------------------
 
-@router.get("/drivers/",response_model_exclude={"data": {"__all__": {"password"}}} ,response_model_exclude_none=True,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
+@router.get("/drivers/",response_model_exclude={"data": {"__all__": {"password"}}} ,response_model_exclude_none=True, response_model=APIResponse[List[DriverOut]] ,      dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
 async def list_of_drivers(start:int= 0, stop:int=100,token:accessTokenOut = Depends(verify_admin_token)):
     items = await retrieve_drivers(start=start,stop=stop)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
-@router.get("/driver/{driver_id}", response_model_exclude={"data": {"password"}} ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
-async def get_a_particular_driver_details(driver_id:str,token:accessTokenOut = Depends(verify_admin_token)):
+@router.get("/driver/{driverId}", response_model_exclude={"data": {"password"}} , response_model=APIResponse[DriverOut] ,  dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def get_a_particular_driver_details(driverId:str,token:accessTokenOut = Depends(verify_admin_token)):
     try: 
-        items = await retrieve_driver_by_driver_id(id=driver_id)
+        items = await retrieve_driver_by_driver_id(id=driverId)
         return APIResponse(status_code=200, data=items, detail="users items fetched")
     except Exception as e:
         raise HTTPException(status_code=500,detail=f"{e}")
     
-@router.patch("/ban/driver/{driver_id}", response_model_exclude={"data": {"password"}} ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
-async def ban_a_driver_from_using_the_app(driver_id:str,token:accessTokenOut = Depends(verify_admin_token)):
-    # TODO: IMPLEMENT THIS ROUTE FUNCTION
-    pass
+@router.patch("/ban/driver/{driverId}", response_model_exclude={"data": {"password"}} , response_model=APIResponse[DriverOut] ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def ban_a_driver_from_using_the_app(driverId:str,token:accessTokenOut = Depends(verify_admin_token)):
+    driver_data = DriverUpdate(accountStatus=AccountStatus.BANNED)
+    update =await update_driver_by_id(driver_id=driverId,driver_data=driver_data)
+    return APIResponse(status_code=200,data=update,detail="Successfully banned driver from the app")
     
 # --------------------------------------------------
 # --------------- RIDER MANAGEMENT -----------------
@@ -246,23 +261,24 @@ async def ban_a_driver_from_using_the_app(driver_id:str,token:accessTokenOut = D
 
 
 
-@router.get("/riders/",response_model_exclude={"data": {"__all__": {"password"}}} ,response_model_exclude_none=True,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
+@router.get("/riders/",response_model_exclude={"data": {"__all__": {"password"}}} ,response_model_exclude_none=True, response_model=APIResponse[List[RiderOut]],    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)])
 async def list_riders(start:int= 0, stop:int=100,token:accessTokenOut = Depends(verify_admin_token)):
     items = await retrieve_riders(start=0,stop=100)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
 
-@router.get("/rider/{riderId}", response_model_exclude={"data": {"password"}} ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+@router.get("/rider/{riderId}", response_model_exclude={"data": {"password"}}, response_model=APIResponse[RiderOut] ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
 async def get_a_particular_riders_details(riderId:str,token:accessTokenOut = Depends(verify_admin_token)):
     items = await retrieve_rider_by_rider_id(id=riderId)
     return APIResponse(status_code=200, data=items, detail="users items fetched")
 
  
-@router.patch("/ban/rider/{riderId}", response_model_exclude={"data": {"password"}},    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+@router.patch("/ban/rider/{riderId}", response_model_exclude={"data": {"password"}}, response_model=APIResponse[RiderOut] ,  dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
 async def ban_a_rider_from_using_the_app(riderId:str,token:accessTokenOut = Depends(verify_admin_token)):
-    # TODO: IMPLEMENT THIS ROUTE FUNCTION    
-    pass
+    rider_data = DriverUpdate(accountStatus=AccountStatus.BANNED)
+    update =await update_rider_by_id(user_id=riderId,user_data=rider_data)
+    return APIResponse(status_code=200,data=update,detail="Successfully banned Rider from the app")
 
 
 
@@ -270,13 +286,27 @@ async def ban_a_rider_from_using_the_app(riderId:str,token:accessTokenOut = Depe
 # --------------- INVOICE MANAGEMENT ---------------
 # --------------------------------------------------
 
-@router.post("/invoice/{rideId}", response_model_exclude={"data": {"password"}},    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
-async def generate_an_invoice_for_a_ride_for_mainly_business_clients(rideId:str,token:accessTokenOut = Depends(verify_admin_token)):
-    # TODO: IMPLEMENT THIS ROUTE FUNCTION    
-    pass
+@router.post("/invoice/{rideId}", response_model_exclude={"data": {"password"}}, response_model=APIResponse[InvoiceData] ,   dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+async def generate_an_invoice_for_a_ride_for_mainly_business_clients(rideId:str,token:accessTokenOut = Depends(verify_admin_token),payment_service: PaymentService = Depends(get_payment_service)):
+
+    invoice_data = await payment_service.send_invoice(ride_id=rideId)
+    invoice = InvoiceData(**invoice_data)
+    rideUpdate = RideUpdate(invoiceData=invoice)
+    ride = await retrieve_ride_by_ride_id(id=rideId)
+    await update_ride_by_id_admin_func(ride_id=ride.userId,ride_data=rideUpdate)
+    
+    return APIResponse(data=invoice_data,status_code=200,detail="Successfully generated invoice")  
+   
 
 
-@router.get("/invoice/{rideId}", response_model_exclude={"data": {"password"}},    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
+@router.get("/invoice/{rideId}", response_model_exclude={"data": {"password"}}, response_model=APIResponse[InvoiceData] ,   dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)],response_model_exclude_none=True)
 async def get_an_update_on_the_invoice_for_the_ride(rideId:str,token:accessTokenOut = Depends(verify_admin_token)):
-    # TODO: IMPLEMENT THIS ROUTE FUNCTION    
-    pass
+    ride =  await retrieve_ride_by_ride_id(id=rideId) 
+    
+    if ride.invoiceData:
+        return APIResponse(data =ride.invoiceData,status_code=200,detail="Successfully retrieved Invoice data for this ride" )
+    else:
+        HTTPException(status_code=404,detail="This ride doesn't have an invoice probably not initiated by the admin")
+
+
+# TODO: WEBHOOK FOR RECEIVING INVOICE DATA UPDATE SHOULD BE HERE WHEN AN INVOICE IS PAID IT SHOULD UPDATE THE INVOICE DATA OBJECT IN A RIDE

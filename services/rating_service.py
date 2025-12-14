@@ -18,7 +18,11 @@ from repositories.rating import (
     update_rating,
     delete_rating,
 )
+from services.ride_service import (
+    retrieve_ride_by_ride_id
+)
 from schemas.rating import RatingCreate, RatingUpdate, RatingOut
+from schemas.imports import RideStatus
 
 
 async def add_rating(rating_data: RatingCreate) -> RatingOut:
@@ -27,8 +31,11 @@ async def add_rating(rating_data: RatingCreate) -> RatingOut:
     Returns:
         _type_: RatingOut
     """
-    # TODO: Confirm if a ride id exists before letting a rating go through
-    return await create_rating(rating_data)
+   
+   
+    ride= await retrieve_ride_by_ride_id(id= rating_data.rideId)
+    if ride.rideStatus==RideStatus.completed:
+        return await create_rating(rating_data)
 
 
 async def remove_rating(rating_id: str):

@@ -216,7 +216,7 @@ async def test_scheduler(message):
    
     
 # Simple test route
-@app.get("/",tags=["Health"], include_in_schema=False)
+@app.get("/test",tags=["Health"])
 def root():
     run_time = datetime.now() + timedelta(seconds=20)
     scheduler.add_job(test_scheduler,"date",run_date=run_time,args=[f"test message {run_time}"],misfire_grace_time=31536000)

@@ -14,8 +14,26 @@ from fastapi import HTTPException,status
 from typing import List,Optional
 from schemas.ride import RideUpdate, RideCreate, RideOut
 
+
+
+
+async def check_if_user_has_an_existing_active_ride(user_id:str):
+    active_statuses = ["arrivingToPickup","drivingToDestination","pendingPayment"]
+    existing_ride = await db.rides.find_one({
+        "userId": user_id, 
+        "rideStatus": {"$in": active_statuses}
+    })
+    if existing_ride:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"You still have an active ride ({existing_ride['rideStatus']}). Please complete or cancel it first."
+        )
+
+
+
 async def create_ride(ride_data: RideCreate) -> RideOut:
     ride_dict = ride_data.model_dump()
+
     result =await db.rides.insert_one(ride_dict)
     result = await db.rides.find_one(filter={"_id":result.inserted_id})
     returnable_result = RideOut(**result)
@@ -67,4 +85,15 @@ async def update_ride(filter_dict: dict, ride_data: RideUpdate) -> RideOut:
     return returnable_result
 
 async def delete_ride(filter_dict: dict):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    
+    if "_id" in filter_dict and isinstance(filter_dict["_id"], str):
+        try:
+            
+            filter_dict["_id"] = ObjectId(filter_dict["_id"])
+        except InvalidId:
+            
+            pass 
+
     return await db.rides.delete_one(filter_dict)

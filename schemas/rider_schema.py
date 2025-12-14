@@ -30,6 +30,7 @@ class RiderUpdate(BaseModel):
     # Add other fields here
     firstName:Optional[str]=None
     lastName:Optional[str]=None
+    
     accountStatus:Optional[AccountStatus]=None 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
@@ -39,6 +40,7 @@ class RiderOut(RiderBase):
     lastName:Optional[str]='' 
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     id: Optional[str] = Field(default=None, alias="_id")
+   
     date_created: Optional[int] = None
     last_updated: Optional[int] = None
     refresh_token: Optional[str] =None

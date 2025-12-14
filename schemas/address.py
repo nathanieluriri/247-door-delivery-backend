@@ -26,7 +26,9 @@ class AddressCreate(AddressBase):
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
 class AddressUpdate(BaseModel):
-    # Add other fields here 
+    # Add other fields here
+    label:Optional[str]=None
+    placeId:Optional[str]=None 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
 class AddressOut(AddressBase):
