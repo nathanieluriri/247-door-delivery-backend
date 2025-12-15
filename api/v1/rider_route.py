@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
 from typing import List, Literal, Union
 from core.countries import ALLOWED_COUNTRIES
-from core.payements import PaymentService, get_payment_service
+from core.payments import PaymentService, get_payment_service
 from core.vehicles import Vehicle
 from core.vehicles_config import VehicleType
 from schemas.address import AddressBase, AddressCreate, AddressOut, AddressUpdate
@@ -20,6 +20,7 @@ from schemas.rider_schema import (
     RiderUpdate,
     RiderRefresh,
 )
+from security.account_status_checks import check_rider_account_status
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
 from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details
 from services.rating_service import add_rating, retrieve_rating_by_user_id
@@ -261,7 +262,7 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
     return APIResponse(status_code=200,data=ride,detail="Successfully requested for a ride")
 
 
-@router.patch("/ride/cancel/{rideId}",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[RideOut])
+@router.patch("/ride/cancel/{rideId}",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role),Depends(check_rider_account_status)],response_model=APIResponse[RideOut])
 async def cancel_a_requested_ride_before_ride_has_begun(rideId:str,token:accessTokenOut = Depends(verify_token_rider_role)):
     canceled_ride = RideUpdate(rideStatus=RideStatus.canceled)
     updated_ride = await update_ride_by_id(ride_id=rideId,rider_id=token.userId,ride_data=canceled_ride)
@@ -269,7 +270,7 @@ async def cancel_a_requested_ride_before_ride_has_begun(rideId:str,token:accessT
  
 
 
-@router.get("/ride/{rideId}",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[RideOut])
+@router.get("/ride/{rideId}",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role),Depends(check_rider_account_status)],response_model=APIResponse[RideOut])
 async def view_ride_details(rideId:str,token:accessTokenOut = Depends(verify_token_rider_role)):
     
     ride=await retrieve_rides_by_user_id_and_ride_id(user_id=token.userId,ride_id=rideId)
@@ -282,14 +283,4 @@ async def generate_public_ride_sharing_link(rideId:str):
     pass
 
 
-# TODO: WEBHOOK FOR RECEIVING succesful payments 
-# - if a payment is successful update a ride from pendingPayment to findingDriver
-# - and add receipt url, paymentIntent and the rest to the ride body then use a background task to initiate the update
-# - create a different outObject to validate for returning reciept and payment related data  
-
-
-# TODO: Create a reusable dependency that checks a user's account status.
-# - Use Redis to cache the account status.
-# - If the account is active, allow the operation; otherwise, block it.
-# - Apply this dependency only to specific endpoints (not globally).
-# - Cache results to avoid unnecessary database queries.
+  

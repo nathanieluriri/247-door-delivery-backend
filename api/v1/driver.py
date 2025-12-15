@@ -11,6 +11,7 @@ from schemas.driver import (
     DriverUpdate,
     DriverRefresh,
 )
+from security.account_status_checks import check_driver_account_status
 from services.driver_service import (
     add_driver,
     remove_driver,
@@ -64,13 +65,13 @@ async def auth_callback(request: Request):
 
 
 
-@router.get("/" ,response_model_exclude={"data": {"__all__": {"password"}}}, response_model=APIResponse[List[DriverOut]],response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
+@router.get("/" ,response_model_exclude={"data": {"__all__": {"password"}}}, response_model=APIResponse[List[DriverOut]],response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def list_drivers(start:int= 0, stop:int=100):
     items = await retrieve_drivers(start=start,stop=stop)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
-@router.get("/me", response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_driver_role)],response_model_exclude_none=True)
+@router.get("/me", response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)],response_model_exclude_none=True)
 async def get_driver_details(token:accessTokenOut = Depends(verify_any_token)):
  
     try:
@@ -107,7 +108,7 @@ async def refresh_driver_tokens(user_data:DriverRefresh,token:accessTokenOut = D
     return APIResponse(status_code=200, data=items, detail="users items fetched")
 
 
-@router.patch("/profile")
+@router.patch("/profile",dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def update_driver_profile(driver_details:DriverUpdate,token:accessTokenOut = Depends(verify_token_driver_role)):
     driver =  await update_driver_by_id(driver_id=token.userId,driver_data=driver_details)
     return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
@@ -115,7 +116,7 @@ async def update_driver_profile(driver_details:DriverUpdate,token:accessTokenOut
 
 
 
-@router.delete("/account",dependencies=[Depends(verify_token_driver_role)])
+@router.delete("/account",dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def delete_user_account(token:accessTokenOut = Depends(verify_token_driver_role)):
     result = await remove_driver(driver_id=token.userId)
     return APIResponse(data=result,status_code=200,detail="Successfully deleted account")
@@ -126,17 +127,17 @@ async def delete_user_account(token:accessTokenOut = Depends(verify_token_driver
 # -------RATING MANAGEMENT------- 
 # -------------------------------
 
-@router.get("/rating",response_model_exclude={"data": {"__all__": {"password"}}},response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
+@router.get("/rating",response_model_exclude={"data": {"__all__": {"password"}}},response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def view_rating(token:accessTokenOut = Depends(verify_token_driver_role)):
     rating = await retrieve_rating_by_user_id(user_id=token.userId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Retrieved User Rating")
 
-@router.get("/rider/{riderId}/rating",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
+@router.get("/rider/{riderId}/rating",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def view_rider_rating(riderId:str):
     rating = await retrieve_rating_by_user_id(user_id=riderId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Retrieved User Rating")
 
-@router.post("/rate/rider", response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
+@router.post("/rate/rider", response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = Depends(verify_token_driver_role)):
     
 
@@ -151,7 +152,7 @@ async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = De
 # ------- RIDE MANAGEMENT ------- 
 # -------------------------------
 
-@router.get("/ride/history",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role)])
+@router.get("/ride/history",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def ride_history(token:accessTokenOut = Depends(verify_token_driver_role)):
     rides = await retrieve_rides_by_driver_id(driver_id=token.userId)
     return APIResponse(status_code=200,data= rides, detail="Successfully Retrieved Ride history for driver")
@@ -159,9 +160,4 @@ async def ride_history(token:accessTokenOut = Depends(verify_token_driver_role))
 # TODO: Update password routes
 
 
-
-# TODO: Create a reusable dependency that checks a user's account status.
-# - Use Redis to cache the account status.
-# - If the account is active, allow the operation; otherwise, block it.
-# - Apply this dependency only to specific endpoints (not globally).
-# - Cache results to avoid unnecessary database queries.
+ 

@@ -26,6 +26,8 @@ from security.encrypting_jwt import create_jwt_member_token, create_jwt_token
 from security.hash import check_password
 from authlib.integrations.starlette_client import OAuth
 
+from services.email_service import send_ban_warning
+
 oauth = OAuth()
 oauth.register(
     name='google_driver',
@@ -211,3 +213,15 @@ async def update_driver_by_id_admin_func(
         )
 
     return result
+
+
+
+# -------------------------------------
+# ------------ COMBINED LOGIC ---------
+# -------------------------------------
+
+async def ban_drivers(user_id: str, user:dict) -> dict:
+    user_data= DriverUpdate(**user)
+    update =await update_driver_by_id_admin_func(user_id=user_id,user_data=user_data)
+    rider = await retrieve_driver_by_driver_id(id=user_id)
+    send_ban_warning(rider.firstName,rider.lastName)

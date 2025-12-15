@@ -10,9 +10,12 @@ class RiderBase(BaseModel):
 
 class RiderRefresh(BaseModel):
     # Add other fields here 
-    refresh_token:str
-    pass
-
+    refresh_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("refresh_token", "refreshToken"),
+        serialization_alias="refreshToken",
+    )
+  
 
 class RiderCreate(RiderBase):
     # Add other fields here
@@ -26,13 +29,27 @@ class RiderCreate(RiderBase):
     def obscure_password(self):
         self.password=hash_password(self.password)
         return self
-class RiderUpdate(BaseModel):
-    # Add other fields here
-    firstName:Optional[str]=None
-    lastName:Optional[str]=None
     
-    accountStatus:Optional[AccountStatus]=None 
+    
+class RiderUpdate(BaseModel):
+    # Add other fields here 
+    full_name:str
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+   
+class RiderUpdatePassword(BaseModel):
+    # Add other fields here 
+    password:Optional[str | bytes]=None
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+    @model_validator(mode='after')
+    def obscure_password(self):
+        if self.password:
+            self.password=hash_password(self.password)
+            return self
+        
+class RiderUpdateAccountStatus(BaseModel):
+    accountStatus:AccountStatus
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+    
 
 class RiderOut(RiderBase):
     # Add other fields here 
@@ -43,8 +60,16 @@ class RiderOut(RiderBase):
    
     date_created: Optional[int] = None
     last_updated: Optional[int] = None
-    refresh_token: Optional[str] =None
-    access_token:Optional[str]=None
+    refresh_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("refresh_token", "refreshToken"),
+        serialization_alias="refreshToken",
+    )
+    access_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("access_token", "accessToken"),
+        serialization_alias="accessToken",
+    )
     @model_validator(mode="before")
     @classmethod
     def convert_objectid(cls, values):

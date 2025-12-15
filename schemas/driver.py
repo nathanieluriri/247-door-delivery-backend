@@ -33,16 +33,33 @@ class DriverCreate(DriverBase):
     
 class DriverRefresh(BaseModel):
     # Add other fields here 
-    refresh_token:str
+    refresh_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("refresh_token", "refreshToken"),
+        serialization_alias="refreshToken",
+    )
     pass
-
 
 class DriverUpdate(BaseModel):
     # Add other fields here 
-    firstName:Optional[str]=None
-    lastName:Optional[str]=None
-    accountStatus:Optional[AccountStatus]=None
+    full_name:str
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+   
+class DriverUpdatePassword(BaseModel):
+    # Add other fields here 
+    password:Optional[str | bytes]=None
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+    @model_validator(mode='after')
+    def obscure_password(self):
+        if self.password:
+            self.password=hash_password(self.password)
+            return self
+        
+class DriverUpdateAccountStatus(BaseModel):
+    accountStatus:AccountStatus
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+    
+    
 
 class DriverOut(DriverBase):
     # Add other fields here 
@@ -64,8 +81,16 @@ class DriverOut(DriverBase):
         validation_alias=AliasChoices("last_updated", "lastUpdated"),
         serialization_alias="lastUpdated",
     )
-    refresh_token: Optional[str] =None
-    access_token:Optional[str]=None
+    refresh_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("refresh_token", "refreshToken"),
+        serialization_alias="refreshToken",
+    )
+    access_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("access_token", "accessToken"),
+        serialization_alias="accessToken",
+    )
     @model_validator(mode="before")
     @classmethod
     def convert_objectid(cls, values):

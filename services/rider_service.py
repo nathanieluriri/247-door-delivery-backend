@@ -10,6 +10,7 @@ from repositories.rider_repo import (
     update_rider,
     delete_rider,
 )
+from schemas.imports import ALLOWED_ACCOUNT_STATUS_TRANSITIONS
 from schemas.rider_schema import RiderCreate, RiderUpdate, RiderOut,RiderBase,RiderRefresh
 from security.hash import check_password
 from security.encrypting_jwt import create_jwt_member_token
@@ -18,6 +19,8 @@ from repositories.tokens_repo import get_refresh_tokens,get_access_tokens,delete
 from authlib.integrations.starlette_client import OAuth
 import os
 from dotenv import load_dotenv
+
+from services.email_service import send_ban_warning
 
 
 load_dotenv()
@@ -159,8 +162,70 @@ async def update_rider_by_id(user_id: str, user_data: RiderUpdate) -> RiderOut:
 
     return result
 
+async def update_rider_by_id_admin_func(
+    user_id: str,
+    user_data: RiderUpdate,
+) -> RiderOut:
+    """
+    Update rider entry with state validation and no-op prevention.
+    """
 
+    # 1️⃣ Validate ID
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid rider ID format")
+
+    filter_dict = {"_id": ObjectId(user_id)}
+
+    # 2️⃣ Fetch existing rider
+    existing_rider = await get_rider(filter_dict)
+    if not existing_rider:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    # 3️⃣ Prevent unnecessary rewrite (no-op)
+    # Checks if we are trying to update the status to what it currently is
+    if (
+        user_data.accountStatus is not None
+        and user_data.accountStatus == existing_rider.accountStatus
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Rider is already in '{existing_rider.accountStatus}' state",
+        )
+
+    # 4️⃣ Enforce state transition rules
+    if user_data.accountStatus is not None:
+        current_status = existing_rider.accountStatus
+        new_status = user_data.accountStatus
+
+        allowed_next_states = ALLOWED_ACCOUNT_STATUS_TRANSITIONS.get(
+            current_status, set()
+        )
+
+        if new_status not in allowed_next_states:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status transition: {current_status} → {new_status}",
+            )
+
+    # 5️⃣ Perform update
+    result = await update_rider(filter_dict, user_data)
+
+    if not result:
+        raise HTTPException(
+            status_code=404, detail="Rider not found or update failed"
+        )
+
+    return result
 
 # -----------------------------------
-# BOOKING LOGIC
+# COMBINED LOGIC
 # -----------------------------------
+
+async def ban_riders(user_id: str, user:dict) -> dict:
+    user_data= RiderUpdate(**user)
+    update =await update_rider_by_id_admin_func(user_id=user_id,user_data=user_data)
+    rider = await retrieve_rider_by_rider_id(id=user_id)
+    send_ban_warning(rider.firstName,rider.lastName)
+    
+    
+    

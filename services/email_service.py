@@ -5,7 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from dotenv import load_dotenv
-from email_templates.new_sign_in import generate_new_signin_warning_email_from_template
+from email_templates.ban_warning import generate_account_banned_email_from_template
 from email_templates.otp_template import generate_login_otp_email_from_template
 from email_templates.invitation_template import generate_invitation_email_from_template
 from email_templates.revoking_template import generate_revoke_invitation_email_from_template
@@ -99,11 +99,11 @@ def send_html_email_optimized(
 
 # ------------------- Public Function -------------------
 
-def send_new_signin_email(receiver_email: str, firstName,lastName,time_data,ip_address,location,extra_data):
-    """Sends an automated response regarding a new signin."""
+def send_ban_warning(receiver_email: str, firstName,lastName):
+    """Sends a ban notice email."""
     try:
-        html_body = generate_new_signin_warning_email_from_template(
-            firstName,lastName,time_data,ip_address,location,extra_data
+        html_body = generate_account_banned_email_from_template(
+            firstName,lastName 
         )
 
         plain_text = f"""Hello,

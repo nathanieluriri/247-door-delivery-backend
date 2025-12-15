@@ -6,15 +6,16 @@
 # 
 # ============================================================================
 
+from decimal import Decimal
 from core.scheduler import scheduler
-
+from fastapi import status
 from bson import ObjectId
 from fastapi import Depends, HTTPException
 from typing import List
 from datetime import datetime, timedelta
 from datetime import timezone
 utc = timezone.utc
-from core.payements import PaymentService, get_payment_service
+from core.payments import PaymentService, get_payment_service
 from repositories.ride import (
     check_if_user_has_an_existing_active_ride,
     create_ride,
@@ -23,7 +24,7 @@ from repositories.ride import (
     update_ride,
     delete_ride,
 )
-from schemas.imports import RideStatus
+from schemas.imports import ALLOWED_RIDE_STATUS_TRANSITIONS, RIDE_REFUND_RULES, RideStatus
 from schemas.ride import RideCreate, RideUpdate, RideOut
 
 
@@ -103,6 +104,20 @@ async def add_ride(
     check_if_state_is_still_finding_driver_and_6_mins_have_passed_if_so_delete_the_ride,
     trigger="date",run_date=pending_state_removal_run_time, kwargs={ "ride_id": ride.id },misfire_grace_time=31536000
     )
+    return ride
+
+
+async def add_ride_admin_func(
+    ride_data: RideCreate,
+    payment_service: PaymentService = Depends(get_payment_service)
+) -> RideOut:
+    """Adds an entry of RideCreate to the database and returns an object."""
+    
+ 
+    
+    await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
+    ride = await create_ride(ride_data)
+
     return ride
 
 
@@ -226,45 +241,101 @@ async def retrieve_rides(start=0,stop=100) -> List[RideOut]:
     return await get_rides(start=start,stop=stop)
 
 
-async def update_ride_by_id(ride_id: str, ride_data: RideUpdate,rider_id:str=None,driver_id:str=None) -> RideOut:
-    # TODO: ADD MORE CASES RIGHT NOW THE ONLY UPDATE THAT CAN WORK IS WHEN A RIDE IS BEING CANCELLED
-    """updates an entry of ride in the database
-
-    Raises:
-        HTTPException 404(not found): if Ride not found or update failed
-        HTTPException 400(not found): Invalid ride ID format
-
-    Returns:
-        _type_: RideOut
+async def update_ride_by_id(
+    ride_id: str,
+    ride_data: RideUpdate,
+    rider_id: str | None = None,
+    driver_id: str | None = None,
+) -> RideOut:
     """
-    filter_dict={}
+    Update ride with strict state validation and side-effect handling.
+    """
+
+    # 1️⃣ Validate ID
     if not ObjectId.is_valid(ride_id):
-        raise HTTPException(status_code=400, detail="Invalid ride ID format")
-    
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid ride ID format",
+        )
+
+    # 2️⃣ Fetch ride
     ride = await retrieve_ride_by_ride_id(id=ride_id)
-    
-    
-    if rider_id!=None:
-        
-        filter_dict["userId"]=rider_id
-    
-    if driver_id!=None:
-        filter_dict["driverId"]=driver_id
-    
-    filter_dict["_id"] = ObjectId(ride_id)
-    # CANCEL OF RIDE CASES
-    if (ride.rideStatus==RideStatus.findingDriver or ride.rideStatus==RideStatus.pendingPayment) and (ride_data.rideStatus==RideStatus.canceled):
-        # Only case that allows the ride to be canceled
-        result = await update_ride(filter_dict, ride_data)
-        # TODO:depending on the case there should be a way to initiate refunds for each ride
+    if not ride:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found",
+        )
+
+    # 3️⃣ Build filter
+    filter_dict = {"_id": ObjectId(ride_id)}
+
+    if rider_id:
+        filter_dict["userId"] = rider_id
+    if driver_id:
+        filter_dict["driverId"] = driver_id
+
+    # 4️⃣ Prevent no-op updates
+    if (
+        ride_data.rideStatus is not None
+        and ride_data.rideStatus == ride.rideStatus
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Ride already in '{ride.rideStatus}' state",
+        )
+
+    # 5️⃣ Validate state transition
+    if ride_data.rideStatus is not None:
+        current_status = ride.rideStatus
+        target_status = ride_data.rideStatus
+
+        allowed_next_states = ALLOWED_RIDE_STATUS_TRANSITIONS.get(
+            current_status, set()
+        )
+
+        if target_status not in allowed_next_states:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid ride status transition: {current_status} → {target_status}",
+            )
+
+        # 6️⃣ Apply refund side-effects if applicable
+        refund_percentage = RIDE_REFUND_RULES.get(
+            (current_status, target_status)
+        )
+
+        if refund_percentage is not None:
+            try:
+                payment_service = get_payment_service()
+                unit_amount = int(ride.price / 10)
+
+                refund_amount = int(
+                    Decimal(unit_amount) * Decimal(str(refund_percentage))
+                )
+
+                payment_service.refund(
+                    payment_intent_id=ride.checkoutSessionObject.payment_intent,
+                    amount=refund_amount,
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=(
+                        f"Refund failed during ride transition "
+                        f"{current_status} → {target_status}: {e}"
+                    ),
+                )
+
+    # 7️⃣ Perform update
+    result = await update_ride(filter_dict, ride_data)
 
     if not result:
-        raise HTTPException(status_code=404, detail="Ride not found or update failed")
-    
-    
-        
-    return result
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found or update failed",
+        )
 
+    return result
 
 
 
@@ -288,9 +359,12 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     filter_dict["_id"] = ObjectId(ride_id)
     # CANCEL OF RIDE CASES
     if (ride.rideStatus==RideStatus.findingDriver or ride.rideStatus==RideStatus.pendingPayment) and (ride_data.rideStatus==RideStatus.canceled):
-        
-        pass
-        # TODO:depending on the case there should be a way to initiate refunds for each ride
+        try:
+            payment_service = get_payment_service()
+            unit_amount = int(ride.price / 10)
+            payment_service.refund(payment_intent_id=ride.checkoutSessionObject.payment_intent,amount=(unit_amount*0.95))
+        except Exception as e:
+            raise HTTPException(status_code=500,detail=f"Exception occured while processing a refund due to a canceled ride in 'update_ride_by_id_admin_func' {e}")    
         
         
     result = await update_ride(filter_dict, ride_data)
@@ -300,3 +374,25 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     
         
     return result
+
+
+
+async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
+    """updates an entry of ride in the database
+
+    Raises:
+        HTTPException 404(not found): if Ride not found or update failed
+        HTTPException 400(not found): Invalid ride ID format
+
+    Returns:
+        _type_: RideOut
+    """
+    filter_dict={}
+    filter_dict["_id"] = ObjectId(ride_id)
+    ride_data = RideUpdate(**payload)
+    result = await update_ride(filter_dict, ride_data)
+    if not result:
+        raise HTTPException(status_code=404, detail="Ride not found or update failed")
+    return result.model_dump()
+
+

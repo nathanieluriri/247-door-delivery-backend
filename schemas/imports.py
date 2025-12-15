@@ -3,16 +3,25 @@ from pydantic import AliasChoices, GetJsonSchemaHandler
 from pydantic import BaseModel, EmailStr, Field,model_validator
 from pydantic_core import core_schema
 from datetime import datetime,timezone
-from typing import Optional,List,Any
+from typing import Dict, Optional,List,Any
 from enum import Enum
 import time
+class Permission(BaseModel):
+    name: str
+    methods: List[str]
+    path: str
+    description: Optional[str] = None
+    
+class PermissionList(BaseModel):
+    permissions: list[Permission]
+
 
 class RideStatus(str, Enum):
+    pendingPayment="pendingPayment"
+    findingDriver="findingDriver"
     arrivingToPickup="arrivingToPickup"
     drivingToDestination="drivingToDestination"
     canceled = "canceled"
-    pendingPayment="pendingPayment"
-    findingDriver="findingDriver"
     completed="completed"
     
     
@@ -44,11 +53,26 @@ ALLOWED_ACCOUNT_STATUS_TRANSITIONS: dict[AccountStatus, set[AccountStatus]] = {
     },
 }
 
+class StripeEvent(BaseModel):
+    id: str
+    type: str
+    data: Dict[str, Any]
+class CheckoutSessionObject(BaseModel):
+    id: str
+    payment_status: str
+    amount_total: Optional[int]
+    currency: Optional[str]
+    payment_intent: Optional[str]
+    payment_link: Optional[str]
+    metadata: Dict[str, str] = {}
     
 class InvoiceData(BaseModel):
-    
+    id:str
     status:Optional[str]=None
-    
+    amount_paid: Optional[int]
+    currency: Optional[str]
+    customer: Optional[str]
+    metadata: Dict[str, str] = {}
     email_sent_to: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("email_sent_to", "emailSentTo"),
@@ -59,8 +83,32 @@ class InvoiceData(BaseModel):
         validation_alias=AliasChoices("invoice_url", "invoiceUrl"),
         serialization_alias="invoiceUrl",
     )
-    invoice_id: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("invoice_id", "invoiceId"),
-        serialization_alias="invoiceId",
-    )
+ 
+ 
+ 
+ALLOWED_RIDE_STATUS_TRANSITIONS: dict[RideStatus, set[RideStatus]] = {
+    RideStatus.pendingPayment: {
+        RideStatus.findingDriver,
+        RideStatus.canceled,
+    },
+    RideStatus.findingDriver: {
+        RideStatus.arrivingToPickup,
+        RideStatus.canceled,
+    },
+    RideStatus.arrivingToPickup: {
+        RideStatus.drivingToDestination,
+        RideStatus.canceled,
+    },
+    RideStatus.drivingToDestination: {
+        RideStatus.completed,
+    },
+    RideStatus.canceled: set(),   # terminal
+    RideStatus.completed: set(),  # terminal
+}
+
+
+RIDE_REFUND_RULES: dict[tuple[RideStatus, RideStatus], float] = {
+    (RideStatus.pendingPayment, RideStatus.canceled): 0.95,
+    (RideStatus.findingDriver, RideStatus.canceled): 0.90,
+    (RideStatus.arrivingToPickup, RideStatus.canceled): 0.75,
+}

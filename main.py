@@ -19,7 +19,7 @@ from pymongo import MongoClient
 import redis
 from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
-
+from core.database import db
 from security.encrypting_jwt import decode_jwt_token
 
 MONGO_URI = os.getenv("MONGO_URL")
@@ -44,6 +44,10 @@ async def lifespan(app:FastAPI):
         id="apscheduler_heartbeat",
         name="APScheduler Heartbeat",
         replace_existing=True
+    )
+    await db.stripe_events.create_index(
+        [("stripe_id", 1)],
+        unique=True
     )
 
     scheduler.start()

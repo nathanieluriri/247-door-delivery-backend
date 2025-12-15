@@ -1,17 +1,21 @@
 import os
 from dotenv import load_dotenv
 from abc import ABC, abstractmethod
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 import stripe
 
-from schemas.ride import RideOut
+from schemas.imports import CheckoutSessionObject, InvoiceData, RideStatus, StripeEvent
+from schemas.ride import RideOut, RideUpdate
 from schemas.rider_schema import RiderOut
+from schemas.stripe_event import StripeEventCreate
+from services.stripe_event_service import  retrieve_stripe_event_by_stripe_event_id
 
 load_dotenv()
 
 VAT_TAX_RATE_ID = os.getenv("STRIPE_TAX_RATE_ID")
-
+WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
 class PaymentProvider(ABC):
     @abstractmethod
@@ -25,7 +29,9 @@ class PaymentProvider(ABC):
     @abstractmethod
     async def refund_payment(self, payment_intent_id: str, amount: int = None) -> dict:
         pass
-
+    @abstractmethod
+    async def handle_stripe_webhook(self,request: Request):
+        pass
 
 class StripePaymentProvider(PaymentProvider):
     def __init__(self, api_key: str, success_redirect_url: str):
@@ -68,7 +74,7 @@ class StripePaymentProvider(PaymentProvider):
                 }
             ],
             after_completion={"type": "redirect", "redirect": {"url": self.success_redirect_url}},
-            metadata={"fare_id": ride.id, "user_id": ride.userId},
+            metadata={"ride_id": ride.id, "user_id": ride.userId},
         )
 
         return payment_link.url
@@ -146,6 +152,99 @@ class StripePaymentProvider(PaymentProvider):
             return {"refund_id": refund.id, "status": refund.status}
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
+        
+    async def handle_stripe_webhook(self, request: Request):
+        """
+        Stripe webhook handler supporting:
+        - invoice.payment_succeeded
+        - invoice.payment_failed
+        - checkout.session.completed (Payment Links & Checkout)
+        """
+
+        from celery_worker import celery_app
+
+        # 1) Verify Stripe signature
+        payload = await request.body()
+        sig_header = request.headers.get("stripe-signature")
+        if not sig_header:
+            return JSONResponse(status_code=400, content={"detail": "Missing Stripe signature"})
+
+        try:
+            event = stripe.webhooks.constructEvent(payload, sig_header, WEBHOOK_SECRET)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
+        except stripe.error.SignatureVerificationError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
+
+        stripe_event = StripeEvent(**event)
+        event_id = stripe_event.id
+        event_type = stripe_event.type
+        data_obj = stripe_event.data["object"]
+        
+        stripe_event_create = StripeEventCreate(stripe_id=event_id,event=stripe_event)
+        
+        if await retrieve_stripe_event_by_stripe_event_id(event_id):
+            return {"status": "ignored_duplicate"}
+        
+        
+        celery_app.send_task("celery_worker.run_async_task",args=["add_stripe_event",{"payload": stripe_event_create.event.model_dump()}])
+ 
+        
+        
+
+
+
+        # -----------------------------
+        # HANDLE INVOICE EVENTS
+        # -----------------------------
+        if event_type == "invoice.payment_succeeded":
+            invoice = InvoiceData(**data_obj)
+            print(f"[WEBHOOK] Invoice paid: id={invoice.id}")
+
+          
+            ride_id = invoice.metadata.get("ride_id")
+ 
+            invoiced_ride = RideUpdate(invoiceData=invoice,stripeEvent=stripe_event,paymentStatus=True)
+            celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": invoiced_ride.event.model_dump()}])
+             
+            
+        elif event_type == "invoice.payment_failed":
+            invoice = InvoiceData(**data_obj)
+            print(f"[WEBHOOK] Invoice payment failed: id={invoice.id}")
+
+             
+
+        # -----------------------------
+        # HANDLE PAYMENT LINK / CHECKOUT
+        # -----------------------------
+        elif event_type == "checkout.session.completed":
+            session = CheckoutSessionObject(**data_obj)
+
+            # Only handle completed *paid* sessions
+            if session.payment_status != "paid":
+                return {"status": "ignored_not_paid"}
+
+            # Payment Links always populate payment_link
+            if not session.payment_link:
+                return {"status": "ignored_not_payment_link"}
+
+            print(f"[WEBHOOK] Checkout Session paid: id={session.id}")
+ 
+            ride_id = session.metadata.get("ride_id")
+            payment_intent_id = session.payment_intent
+
+            paid_ride = RideUpdate(checkoutSessionObject=session,stripeEvent=stripe_event,rideStatus=RideStatus.findingDriver,payment_intent_id=payment_intent_id,paymentStatus=True)
+            celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": paid_ride.event.model_dump()}])
+             
+   
+
+        # -----------------------------
+        # UNHANDLED EVENT TYPES
+        # -----------------------------
+        else:
+            print(f"[WEBHOOK] Unhandled event type: {event_type}")
+
+        return {"status": "success"}
 
 
 class PaymentService:
@@ -166,6 +265,9 @@ class PaymentService:
 
     async def refund(self, payment_intent_id: str, amount: int = None):
         return await self.provider.refund_payment(payment_intent_id, amount)
+    
+    async def webhook_handler(self, request: Request):
+        return await self.provider.handle_stripe_webhook(request=request)
 
 
 def get_payment_service() -> PaymentService:
