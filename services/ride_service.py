@@ -106,7 +106,8 @@ async def add_ride(
     )
     return ride
 
-
+# TODO: IF A RIDE IS CANCELD ASK USER IF THEY WANT TO FIND ANOTHER DRIVER FOR THE RIDE OR COLLECT A REFUND
+ 
 async def add_ride_admin_func(
     ride_data: RideCreate,
     payment_service: PaymentService = Depends(get_payment_service)
@@ -179,7 +180,7 @@ async def retrieve_rides_by_user_id(user_id: str) -> RideOut:
     result = await get_rides(filter_dict)
 
     if not result:
-        raise HTTPException(status_code=404, detail="Ride not found")
+        return []
 
     return result
 
@@ -335,6 +336,15 @@ async def update_ride_by_id(
             detail="Ride not found or update failed",
         )
 
+    # 8️⃣ Emit WebSocket status update if status changed
+    if ride_data.rideStatus is not None and ride_data.rideStatus != ride.rideStatus:
+        try:
+            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
+             
+            await emit_ride_status_update(ride_id, ride_data.rideStatus, {"message": f"Ride status changed to {ride_data.rideStatus.value}"},10)
+        except Exception as e:
+            print(f"Warning: Failed to emit WebSocket update for ride {ride_id}: {e}")
+
     return result
 
 
@@ -370,7 +380,15 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     result = await update_ride(filter_dict, ride_data)
     if not result:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")
-    
+
+    # Emit WebSocket status update if status changed
+    if ride_data.rideStatus is not None and ride_data.rideStatus != ride.rideStatus:
+        try:
+            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
+             
+            await emit_ride_status_update(ride_id, ride_data.rideStatus, {"message": f"Ride status changed to {ride_data.rideStatus.value}"},10)
+        except Exception as e:
+            print(f"Warning: Failed to emit WebSocket update for ride {ride_id}: {e}")
     
         
     return result
@@ -389,10 +407,24 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
     """
     filter_dict={}
     filter_dict["_id"] = ObjectId(ride_id)
+    
+    # Get current ride to check status change
+    current_ride = await retrieve_ride_by_ride_id(id=ride_id)
+    
     ride_data = RideUpdate(**payload)
     result = await update_ride(filter_dict, ride_data)
     if not result:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")
+    
+    # Emit WebSocket status update if status changed
+    if ride_data.rideStatus is not None and current_ride and ride_data.rideStatus != current_ride.rideStatus:
+        try:            
+            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
+             
+            await emit_ride_status_update(ride_id, ride_data.rideStatus, {"message": f"Ride status changed to {ride_data.rideStatus.value}"},10)
+        except Exception as e:
+            print(f"Warning: Failed to emit WebSocket update for ride {ride_id}: {e}")
+    
     return result.model_dump()
 
 

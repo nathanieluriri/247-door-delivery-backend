@@ -151,6 +151,7 @@ def send_otp(otp: str, user_email:str,):
             smtp_login=EMAIL_USERNAME,
             smtp_password=EMAIL_PASSWORD
         )
+        return 0
 
     except Exception as e:
         logger.error(f"Failed to send OTP email to {user_email}: {e}")

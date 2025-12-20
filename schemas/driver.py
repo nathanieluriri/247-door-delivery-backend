@@ -28,6 +28,7 @@ class DriverCreate(DriverBase):
     @model_validator(mode='after')
     def obscure_password(self):
         self.password=hash_password(self.password)
+        self.email = self.email.lower()
         return self
     
     
@@ -54,6 +55,9 @@ class DriverUpdatePassword(BaseModel):
         if self.password:
             self.password=hash_password(self.password)
             return self
+        
+        
+
         
 class DriverUpdateAccountStatus(BaseModel):
     accountStatus:AccountStatus

@@ -61,22 +61,28 @@ def create_jwt_token(
     user_id: str,
     user_type: str,
     is_activated: bool,
-    role:str="member"
+    role: str = "member",
 ) -> str:
-    """Generate a secure JWT token with a signed payload."""
-    header = {"alg": ALGORITHM}
-    
     payload = JWTPayload(
         access_token=access_token,
         user_id=user_id,
         user_type=user_type,
         is_activated=is_activated,
-        exp= datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-        iat= datetime.now(timezone.utc),
+        exp=datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        iat=datetime.now(timezone.utc),
     ).model_dump()
-    payload["role"]=role
-    token = jwt.encode(header, payload, SECRET_KEY)
-    return token.decode() if isinstance(token, bytes) else token
+
+    payload["role"] = role
+
+    token = jwt.encode(
+        payload=payload,
+        key=SECRET_KEY,
+        algorithm=ALGORITHM,   # "HS256"
+        headers={"typ": "JWT"},
+    )
+
+    return token
+
 
 
 

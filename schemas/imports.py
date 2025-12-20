@@ -6,6 +6,32 @@ from datetime import datetime,timezone
 from typing import Dict, Optional,List,Any
 from enum import Enum
 import time
+
+from security.hash import hash_password
+
+
+class LoginType(str,Enum):
+    password="password"
+    passwordless="passwordless"
+    google="google"
+class UserType(str,Enum):
+    rider= "rider"
+    driver="driver"
+    admin="admin"
+class ResetPasswordInitiation(BaseModel):
+    # Add other fields here
+    email:EmailStr 
+    
+class ResetPasswordInitiationResponse(BaseModel):
+    # Add other fields here
+    resetToken:str
+    
+    
+class ResetPasswordConclusion(BaseModel):
+    # Add other fields here
+    otp:str
+    resetToken:str 
+    password:str 
 class Permission(BaseModel):
     name: str
     methods: List[str]

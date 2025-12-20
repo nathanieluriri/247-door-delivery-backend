@@ -167,13 +167,17 @@ class StripePaymentProvider(PaymentProvider):
         payload = await request.body()
         sig_header = request.headers.get("stripe-signature")
         if not sig_header:
+            print({"detail":"Missing Stripe signature"})
             return JSONResponse(status_code=400, content={"detail": "Missing Stripe signature"})
 
         try:
-            event = stripe.webhooks.constructEvent(payload, sig_header, WEBHOOK_SECRET)
+            event = stripe.Webhook.construct_event(payload, sig_header, WEBHOOK_SECRET)
+            
         except ValueError:
+            print({"detail": "Invalid payload"})
             return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
         except stripe.error.SignatureVerificationError:
+            print({"detail":"Invalid signature"})
             return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
 
         stripe_event = StripeEvent(**event)
@@ -183,11 +187,11 @@ class StripePaymentProvider(PaymentProvider):
         
         stripe_event_create = StripeEventCreate(stripe_id=event_id,event=stripe_event)
         
-        if await retrieve_stripe_event_by_stripe_event_id(event_id):
+        if await retrieve_stripe_event_by_stripe_event_id(event_id) !=None:
             return {"status": "ignored_duplicate"}
         
         
-        celery_app.send_task("celery_worker.run_async_task",args=["add_stripe_event",{"payload": stripe_event_create.event.model_dump()}])
+        celery_app.send_task("celery_worker.run_async_task",args=["add_stripe_event",{"payload": stripe_event_create.model_dump()}])
  
         
         
@@ -205,7 +209,7 @@ class StripePaymentProvider(PaymentProvider):
             ride_id = invoice.metadata.get("ride_id")
  
             invoiced_ride = RideUpdate(invoiceData=invoice,stripeEvent=stripe_event,paymentStatus=True)
-            celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": invoiced_ride.event.model_dump()}])
+            celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": invoiced_ride.model_dump()}])
              
             
         elif event_type == "invoice.payment_failed":
@@ -234,7 +238,12 @@ class StripePaymentProvider(PaymentProvider):
             payment_intent_id = session.payment_intent
 
             paid_ride = RideUpdate(checkoutSessionObject=session,stripeEvent=stripe_event,rideStatus=RideStatus.findingDriver,payment_intent_id=payment_intent_id,paymentStatus=True)
-            celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": paid_ride.event.model_dump()}])
+            celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": paid_ride.model_dump()}])
+            
+            # Emit WebSocket status update
+            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
+             
+            await emit_ride_status_update(ride_id, paid_ride.rideStatus, {"message": "Payment confirmed, finding driver..."},14)
              
    
 

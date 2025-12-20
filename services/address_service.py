@@ -89,7 +89,7 @@ async def retrieve_address_by_user_id(userId: str) -> List[AddressOut]:
     result = await get_addresss(filter_dict)
 
     if not result:
-        raise HTTPException(status_code=404, detail="Address not found")
+        return []
 
     return result
 

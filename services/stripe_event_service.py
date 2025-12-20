@@ -39,7 +39,7 @@ async def remove_stripe_event(stripe_event_id: str):
         HTTPException 404:  StripeEvent not found
     """
     if not ObjectId.is_valid(stripe_event_id):
-        raise HTTPException(status_code=400, detail="Invalid stripe_event ID format")
+        raise HTTPException(status_code=400, detail="Invalid stripe_event ID format while trying to remove stripe event")
 
     filter_dict = {"_id": ObjectId(stripe_event_id)}
     result = await delete_stripe_event(filter_dict)
@@ -60,13 +60,30 @@ async def retrieve_stripe_event_by_stripe_event_id(id: str) -> StripeEventOut:
         _type_: StripeEventOut
     """
     if not ObjectId.is_valid(id):
-        raise HTTPException(status_code=400, detail="Invalid stripe_event ID format")
+        raise HTTPException(status_code=400, detail="Invalid stripe_event ID format while trying to retrieve stripe event by stripe event id")
 
     filter_dict = {"_id": ObjectId(id)}
     result = await get_stripe_event(filter_dict)
 
     if not result:
         raise HTTPException(status_code=404, detail="StripeEvent not found")
+
+    return result
+
+
+async def retrieve_stripe_event_by_stripe_event_id(stripe_id: str) -> StripeEventOut:
+    """Retrieves stripe_event object based specific stripe_id 
+ 
+
+    Returns:
+        _type_: StripeEventOut
+    """
+ 
+    filter_dict = {"stripe_id": stripe_id}
+    result = await get_stripe_event(filter_dict)
+
+    if not result:
+        return None
 
     return result
 
@@ -91,7 +108,7 @@ async def update_stripe_event_by_id(stripe_event_id: str, stripe_event_data: Str
         _type_: StripeEventOut
     """
     if not ObjectId.is_valid(stripe_event_id):
-        raise HTTPException(status_code=400, detail="Invalid stripe_event ID format")
+        raise HTTPException(status_code=400, detail="Invalid stripe_event ID format while trying to update stripe event by id")
 
     filter_dict = {"_id": ObjectId(stripe_event_id)}
     result = await update_stripe_event(filter_dict, stripe_event_data)

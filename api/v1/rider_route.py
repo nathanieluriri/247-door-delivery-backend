@@ -1,12 +1,16 @@
 
+import os
+from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
 from typing import List, Literal, Union
+
+from fastapi.responses import RedirectResponse
 from core.countries import ALLOWED_COUNTRIES
 from core.payments import PaymentService, get_payment_service
 from core.vehicles import Vehicle
 from core.vehicles_config import VehicleType
 from schemas.address import AddressBase, AddressCreate, AddressOut, AddressUpdate
-from schemas.imports import RideStatus
+from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.place import FareBetweenPlacesCalculationRequest, FareBetweenPlacesCalculationResponse, Location, PlaceBase
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
@@ -19,10 +23,12 @@ from schemas.rider_schema import (
     RiderBase,
     RiderUpdate,
     RiderRefresh,
+    LoginType,
+    RiderUpdatePassword,
 )
 from security.account_status_checks import check_rider_account_status
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
-from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details
+from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details, nearby_drivers
 from services.rating_service import add_rating, retrieve_rating_by_user_id
 from services.ride_service import add_ride, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, update_ride_by_id
 from services.rider_service import (
@@ -31,31 +37,63 @@ from services.rider_service import (
     retrieve_riders,
     authenticate_rider,
     retrieve_rider_by_rider_id,
+    rider_reset_password_conclusion,
+    rider_reset_password_initiation,
     update_rider_by_id,
     refresh_rider_tokens_reduce_number_of_logins,
     oauth
 )
 from security.auth import verify_token,verify_token_to_refresh, verify_token_rider_role
-router = APIRouter(prefix="/users", tags=["Riders"])
+from dotenv import load_dotenv 
+load_dotenv()
+
+router = APIRouter(prefix="/riders", tags=["Riders"])
+
+SUCCESS_PAGE_URL = os.getenv("SUCCESS_PAGE_URL", "http://localhost:8080/success")
+ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
+
 # --- Step 1: Redirect user to Google login ---
 @router.get("/google/auth")
 async def login_with_google_account(request: Request):
-    base_url = request.url_for("root")
-    redirect_uri = f"{base_url}auth/callback"
-    print(redirect_uri)
+    redirect_uri = request.url_for("auth_callback_rider")
+    print("REDIRECT URI:", redirect_uri)
+ 
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
 # --- Step 2: Handle callback from Google ---
 @router.get("/auth/callback")
-async def auth_callback(request: Request):
+async def auth_callback_rider(request: Request):
     token = await oauth.google.authorize_access_token(request)
     user_info = token.get('userinfo')
 
     # Just print or return user info for now
     if user_info:
         print("✅ Google user info:", user_info)
-        return APIResponse(status_code=200,detail="Successful Login",data={"status": "success", "user": user_info})
+        rider = RiderBase(firstName=user_info['name'],password='',lastName=user_info['given_name'],email=user_info['email'],loginType=LoginType.google)
+        data = await authenticate_rider(user_data=rider)
+        if data==None:
+            new_rider = RiderCreate(**rider.model_dump())
+            items = await add_rider(user_data=new_rider)
+            
+            access_token = items.access_token
+            refresh_token = items.refresh_token
+            success_url = f"{SUCCESS_PAGE_URL}?access_token={access_token}&refresh_token={refresh_token}"
+            return RedirectResponse(
+            url=success_url,
+            status_code=status.HTTP_302_FOUND
+        )
+        access_token = data.access_token
+        refresh_token = data.refresh_token
+
+         
+
+        success_url = f"{SUCCESS_PAGE_URL}?access_token={access_token}&refresh_token={refresh_token}"
+
+        return RedirectResponse(
+            url=success_url,
+            status_code=status.HTTP_302_FOUND
+        )
     else:
         raise HTTPException(status_code=400,detail={"status": "failed", "message": "No user info found"})
 
@@ -82,10 +120,12 @@ async def signup_new_rider(user_data:RiderBase):
 @router.post("/login",response_model_exclude={"data": {"password"}}, response_model=APIResponse[RiderOut])
 async def login_rider(user_data:RiderBase):
     items = await authenticate_rider(user_data=user_data)
+   
+     
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
-@router.post("/refesh",response_model_exclude={"data": {"password"}},response_model=APIResponse[RiderOut],dependencies=[Depends(verify_token_to_refresh)])
+@router.post("/refresh",response_model_exclude={"data": {"password"}},response_model=APIResponse[RiderOut],dependencies=[Depends(verify_token_to_refresh)])
 async def refresh_rider_tokens(user_data:RiderRefresh,token:accessTokenOut = Depends(verify_token_to_refresh)):
     
     items= await refresh_rider_tokens_reduce_number_of_logins(user_refresh_data=user_data,expired_access_token=token.accesstoken)
@@ -167,6 +207,19 @@ async def update_address_label(addressId:str,address_data:AddressUpdate,token:ac
 # ------- PLACES MANAGEMENT ------- 
 # -------------------------------
 @router.get(
+    "/place/allowedCountries",
+    response_model=APIResponse[List[str]],
+    summary="Get location suggestions (cached for 14 days)",
+)
+async def autocomplete(
+    input: str = Query(..., description="User input text for autocomplete"),
+    country: ALLOWED_COUNTRIES = Query(..., description="Choose one of them ")
+):
+    """Return location autocomplete suggestions."""
+    return APIResponse(data=ALLOWED_COUNTRIES,details="Allowed Countries Retrieved",status_code=200)
+
+
+@router.get(
     "/place/autocomplete",
     response_model=APIResponse[Union[List[PlaceBase],None]],
     summary="Get location suggestions (cached for 14 days)",
@@ -237,30 +290,35 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
     drop_off = await get_place_details(place_id=data.destination)
    
     origin = (pick_up.data["lat"],pick_up.data["lng"])
-    destination = (drop_off.data["lat"],drop_off.data["lng"])
-    stops=None
-    if data.stops:
-        stops=[]
-        index=0
-        for stop in data.stops:
-            _place_details =await get_place_details(place_id=stop)
-            stops.append((_place_details.data['lat'],_place_details.data['lng']))
     
-    map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)
+    available_drivers = await nearby_drivers(pickup_lat=pick_up.data["lat"],pickup_lon=pick_up.data["lng"])
     
-    
-    vehicle = Vehicle[data.vehicleType.value]
-    price = calculate_fare_using_vehicle_config_and_distance(
-        distance=map.totalDistanceMeters,
-        time=map.totalDurationSeconds,
-        vehicle=vehicle,
-    )
-    ride_create= RideCreate(**data.model_dump(),userId=token.userId,price=price,origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),map=map)
-    
-    ride = await add_ride(ride_data=ride_create,payment_service=payment_service)
-    
-    return APIResponse(status_code=200,data=ride,detail="Successfully requested for a ride")
-
+    if (available_drivers>0 and data.pickupSchedule==0) or ( data.pickupSchedule>=240):
+        destination = (drop_off.data["lat"],drop_off.data["lng"])
+        stops=None
+        if data.stops:
+            stops=[]
+            index=0
+            for stop in data.stops:
+                _place_details =await get_place_details(place_id=stop)
+                stops.append((_place_details.data['lat'],_place_details.data['lng']))
+        
+        map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)
+        
+        
+        vehicle = Vehicle[data.vehicleType.value]
+        price = calculate_fare_using_vehicle_config_and_distance(
+            distance=map.totalDistanceMeters,
+            time=map.totalDurationSeconds,
+            vehicle=vehicle,
+        )
+        ride_create= RideCreate(**data.model_dump(),userId=token.userId,price=price,origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),map=map)
+        
+        ride = await add_ride(ride_data=ride_create,payment_service=payment_service)
+        
+        return APIResponse(status_code=200,data=ride,detail="Successfully requested for a ride")
+    else:
+        raise HTTPException(status_code=404,detail="No Driver's available within 5km radius for pickup at this moment")
 
 @router.patch("/ride/cancel/{rideId}",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role),Depends(check_rider_account_status)],response_model=APIResponse[RideOut])
 async def cancel_a_requested_ride_before_ride_has_begun(rideId:str,token:accessTokenOut = Depends(verify_token_rider_role)):
@@ -284,3 +342,28 @@ async def generate_public_ride_sharing_link(rideId:str):
 
 
   
+  
+# -----------------------------------
+# ------- PASSWORD MANAGEMENT ------- 
+# -----------------------------------
+
+  
+
+@router.patch("/password-reset",dependencies=[Depends(verify_token_rider_role),Depends(check_rider_account_status)])
+async def update_rider_password_while_logged_in(rider_details:RiderUpdatePassword,token:accessTokenOut = Depends(verify_token_rider_role)):
+    driver =  await update_rider_by_id(driver_id=token.userId,rider_details=rider_details,is_password_getting_changed=True)
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+
+@router.post("/password-reset/request",response_model=APIResponse[ResetPasswordInitiationResponse] )
+async def start_password_reset_process_for_rider_that_forgot_password(rider_details:ResetPasswordInitiation):
+    driver =  await rider_reset_password_initiation(rider_details=rider_details)   
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+
+@router.patch("/password-reset/confirm")
+async def finish_password_reset_process_for_rider_that_forgot_password(rider_details:ResetPasswordConclusion):
+    driver =  await rider_reset_password_conclusion(rider_details)
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")

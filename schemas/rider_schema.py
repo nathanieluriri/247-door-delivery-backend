@@ -3,9 +3,12 @@ from pydantic import Field
 import time
 from security.hash import hash_password
 class RiderBase(BaseModel):
-    # Add other fields here 
+    # Add other fields here
+    firstName:Optional[str]=''
+    lastName:Optional[str ]=''
     email:EmailStr
     password:str | bytes
+    loginType:Optional[LoginType]=LoginType.password
     pass
 
 class RiderRefresh(BaseModel):
@@ -19,21 +22,22 @@ class RiderRefresh(BaseModel):
 
 class RiderCreate(RiderBase):
     # Add other fields here
-    firstName:Optional[str]=''
-    lastName:Optional[str]='' 
-    accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
+ 
+    accountStatus:Optional[AccountStatus]=AccountStatus.ACTIVE
  
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
     @model_validator(mode='after')
     def obscure_password(self):
         self.password=hash_password(self.password)
+        self.email = self.email.lower()
         return self
     
     
 class RiderUpdate(BaseModel):
     # Add other fields here 
-    full_name:str
+    firstName:str
+    lastName:str 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
 class RiderUpdatePassword(BaseModel):
@@ -56,7 +60,11 @@ class RiderOut(RiderBase):
     firstName:Optional[str]=''
     lastName:Optional[str]='' 
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
-    id: Optional[str] = Field(default=None, alias="_id")
+    id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("_id", "id"),
+        serialization_alias="id",
+    )
    
     date_created: Optional[int] = None
     last_updated: Optional[int] = None

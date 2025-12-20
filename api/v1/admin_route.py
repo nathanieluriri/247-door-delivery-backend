@@ -18,11 +18,14 @@ from schemas.admin_schema import (
     AdminBase,
     AdminUpdate,
     AdminRefresh,
-    AdminLogin
+    AdminLogin,
+    AdminUpdatePassword
 )
 from security.account_status_checks import check_admin_account_status_and_permissions
 from services.admin_service import (
     add_admin,
+    admin_reset_password_conclusion,
+    admin_reset_password_initiation,
     remove_admin,
     retrieve_admins,
     authenticate_admin,
@@ -278,7 +281,7 @@ async def ban_a_driver_from_using_the_app(driverId:str,token:accessTokenOut = De
 
 @router.patch("/approve/driver/{driverId}", response_model_exclude={"data": {"password"}} , response_model=APIResponse[DriverOut] ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does),Depends(check_admin_account_status_and_permissions)],response_model_exclude_none=True)
 async def approve_a_driver_to_use_the_driver_app(driverId:str,token:accessTokenOut = Depends(verify_admin_token)):
-    driver_data = DriverUpdate(accountStatus=AccountStatus.ACTIVE)
+    driver_data = DriverUpdateAccountStatus(accountStatus=AccountStatus.ACTIVE)
     update =await update_driver_by_id_admin_func(driver_id=driverId,driver_data=driver_data)
     return APIResponse(status_code=200,data=update,detail="Successfully Approved this driver so they can use the app")
     
@@ -387,10 +390,6 @@ async def cancel_a_ride(
 
 
 
-
-
-
-
 # --------------------------------------------------
 # --------------- INVOICE MANAGEMENT ---------------
 # --------------------------------------------------
@@ -419,3 +418,32 @@ async def get_an_update_on_the_invoice_for_the_ride(rideId:str,token:accessToken
 
  
  
+ 
+ 
+ 
+ 
+ # -----------------------------------
+# ------- PASSWORD MANAGEMENT ------- 
+# -----------------------------------
+
+  
+
+@router.patch("/password-reset",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does),Depends(check_admin_account_status_and_permissions)],)
+async def update_admin_password_while_logged_in(rider_details:AdminUpdatePassword,token:accessTokenOut = Depends(verify_admin_token)):
+    driver =  await update_admin_by_id(driver_id=token.get('userId'),rider_details=rider_details,is_password_getting_changed=True)
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+
+@router.post("/password-reset/request",response_model=APIResponse[ResetPasswordInitiationResponse] )
+async def start_password_reset_process_for_rider_that_forgot_password(admin_details:ResetPasswordInitiation):
+    driver =  await admin_reset_password_initiation(admin_details=admin_details)   
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+
+@router.patch("/password-reset/confirm")
+async def finish_password_reset_process_for_rider_that_forgot_password(admin_details:ResetPasswordConclusion):
+    
+    driver =  await admin_reset_password_conclusion(admin_details=admin_details)
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")

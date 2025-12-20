@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
 from typing import List
+from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
 from schemas.tokens_schema import accessTokenOut
@@ -10,10 +11,13 @@ from schemas.driver import (
     DriverBase,
     DriverUpdate,
     DriverRefresh,
+    DriverUpdatePassword,
 )
 from security.account_status_checks import check_driver_account_status
 from services.driver_service import (
     add_driver,
+    driver_reset_password_conclusion,
+    driver_reset_password_intiation,
     remove_driver,
     retrieve_drivers,
     authenticate_driver,
@@ -157,7 +161,23 @@ async def ride_history(token:accessTokenOut = Depends(verify_token_driver_role))
     rides = await retrieve_rides_by_driver_id(driver_id=token.userId)
     return APIResponse(status_code=200,data= rides, detail="Successfully Retrieved Ride history for driver")
 
-# TODO: Update password routes
-
-
  
+ 
+@router.patch("/password-reset",dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
+async def update_driver_password_while_logged_in(driver_details:DriverUpdatePassword,token:accessTokenOut = Depends(verify_token_driver_role)):
+    driver =  await update_driver_by_id(driver_id=token.userId,driver_data=driver_details,is_password_getting_changed=True)
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+
+@router.post("/password-reset/request",response_model=APIResponse[ResetPasswordInitiationResponse] )
+async def start_password_reset_process_for_driver_that_forgot_password(driver_details:ResetPasswordInitiation):
+    driver =  await driver_reset_password_intiation(driver_details=driver_details)   
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+
+@router.patch("/password-reset/confirm")
+async def finish_password_reset_process_for_driver_that_forgot_password(driver_details:ResetPasswordConclusion):
+    driver =  await driver_reset_password_conclusion(driver_details)
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")

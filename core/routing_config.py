@@ -4,6 +4,11 @@ import googlemaps
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+class Location(BaseModel):
+    latitude: float
+    longitude: float
+
+
 load_dotenv()
 
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
@@ -29,8 +34,44 @@ class DeliveryRouteResponse(BaseModel):
 # --- 2. The Service Class ---
 
 class MapsService:
+    
     def __init__(self, api_key: str):
         self.client = googlemaps.Client(key=api_key)
+    def calculate_road_distance(
+        self, 
+        start_location: Location, 
+        stop_location: Location
+    ) -> Optional[int]:
+        """
+        Calculates the driving distance in meters between two Location objects
+        using the Google Distance Matrix API.
+        """
+        try:
+            # Extract coordinates from Pydantic models
+            origin = (start_location.latitude, start_location.longitude)
+            destination = (stop_location.latitude, stop_location.longitude)
+
+            # Request distance matrix
+            matrix = self.client.distance_matrix(
+                origins=[origin],
+                destinations=[destination],
+                mode="driving",
+                units="metric"
+            )
+
+            # Parse the response
+            # The structure is: matrix['rows'][origin_index]['elements'][destination_index]
+            if matrix['status'] == 'OK':
+                element = matrix['rows'][0]['elements'][0]
+                
+                if element['status'] == 'OK':
+                    return element['distance']['value']  # Returns distance in meters
+                
+            return None
+
+        except Exception as e:
+            print(f"Maps API Error: {e}")
+            return None
 
     def get_delivery_route(
         self, 

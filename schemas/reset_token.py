@@ -1,64 +1,33 @@
 # ============================================================================
-#RIDE SCHEMA 
+#RESET_TOKEN SCHEMA 
 # ============================================================================
-# This file was auto-generated on: 2025-12-09 17:57:01 WAT
+# This file was auto-generated on: 2025-12-17 00:15:10 WAT
 # It contains Pydantic classes  database
 # for managing attributes and validation of data in and out of the MongoDB database.
 #
 # ============================================================================
 
-from core.routing_config import DeliveryRouteResponse
-from core.vehicles_config import VehicleType
 from schemas.imports import *
-from pydantic import AliasChoices, Field
+from pydantic import Field
 import time
-from schemas.place import Location
- 
 
- 
- 
- 
-
-class RideBase(BaseModel):
-    pickup:str
-    destination:str
-    stops:Optional[List[str]]=None
-    vehicleType:VehicleType
-    pickupSchedule:Optional[int]= Field(default_factory=lambda: int(time.time()))
- 
-class RideCreate(RideBase):
-    price:Optional[float]=None
+class ResetTokenBase(BaseModel):
     userId:str
-    rideStatus:Optional[RideStatus]=RideStatus.pendingPayment
-    origin:Optional[Location]=None
-    map: Optional[DeliveryRouteResponse]=None
-    paymentStatus:bool = Field(default=False)
+    userType:UserType
+    otp:str
+    
+
+class ResetTokenCreate(ResetTokenBase):
+    # Add other fields here 
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
-class RideUpdate(BaseModel):
-    # Add other fields here
-    paymentLink:Optional[str]=None
-    invoiceData:Optional[InvoiceData]=None
-    paymentStatus:Optional[bool]=None 
-    checkoutSessionObject:Optional[CheckoutSessionObject]=None
-    stripeEvent:Optional[StripeEvent]=None
-    driverId:Optional[str]=None
-    rideStatus:Optional[RideStatus]=None 
+class ResetTokenUpdate(BaseModel):
+    # Add other fields here 
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
-class RideOut(RideBase):
-    paymentStatus:bool = Field(default=False)
-    price:float
-    rideStatus:Optional[RideStatus]=RideStatus.pendingPayment
-    driverId:Optional[str]=None
-    userId:str
-    invoiceData:Optional[InvoiceData]=None
-    checkoutSessionObject:Optional[CheckoutSessionObject]=None
-    stripeEvent:Optional[StripeEvent]=None
-    origin:Location
-    paymentLink:Optional[str]=None
-    map: DeliveryRouteResponse
+class ResetTokenOut(ResetTokenBase):
+    # Add other fields here 
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

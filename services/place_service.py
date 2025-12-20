@@ -5,6 +5,7 @@
 # It contains  asynchrounous functions that make use of the repo functions 
 # 
 # ============================================================================
+from typing import Literal, Union
 import httpx
 import os
 import json
@@ -197,3 +198,29 @@ def calculate_fare_using_vehicle_config_and_distance(vehicle: Vehicle, distance:
     v = vehicle.value
     
     return (v.base_fare + (v.distance_rate * distance) + (v.time_rate * time))
+
+
+
+
+
+
+async def nearby_drivers(pickup_lat:float,pickup_lon:float)->Union[Literal[0],int]:
+    try:
+        # 1. Use Redis GEORADIUS to find nearby SIDs
+        nearby_sids = cache_db.georadius(
+            name="drivers:geo_index",
+            longitude=pickup_lon,
+            latitude=pickup_lat,
+            radius= 5.0,
+            unit="km"
+        )
+        
+        if not nearby_sids:
+            print("⚠️ No drivers found nearby.")
+            return 0
+
+        print(f"🔍 Found {len(nearby_sids)} drivers within { 5.0}km.")
+        return len(nearby_sids)
+    except Exception as e:
+        print(f"❌ Error broadcasting ride: {e}")
+        return 0

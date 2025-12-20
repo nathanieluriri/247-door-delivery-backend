@@ -11,7 +11,9 @@ from schemas.response_schema import APIResponse
 from repositories.tokens_repo import get_access_tokens_no_date_check
 from limits import parse
 import time   
+from web_socket_handler import *
 import os
+from pymongo import ASCENDING
 from celery_worker import celery_app
 from contextlib import asynccontextmanager
 from core.scheduler import scheduler
@@ -21,7 +23,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
 from core.database import db
 from security.encrypting_jwt import decode_jwt_token
+from redis_om import Migrator
 
+from web_socket_handler.broadcasts.nearby_drivers import broadcast_ride_request
 MONGO_URI = os.getenv("MONGO_URL")
 REDIS_URI = f"redis://{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/0"
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
@@ -40,15 +44,31 @@ async def lifespan(app:FastAPI):
     # --- Add Heartbeat Job ---
     scheduler.add_job(
         apscheduler_heartbeat,
-        trigger=IntervalTrigger(seconds=15),
+        trigger=IntervalTrigger(seconds=105),
         id="apscheduler_heartbeat",
         name="APScheduler Heartbeat",
         replace_existing=True
     )
+    Migrator().run()
+    
     await db.stripe_events.create_index(
         [("stripe_id", 1)],
         unique=True
     )
+    await db.reset_tokens.create_index(
+        [("expires_at", ASCENDING)],
+        expireAfterSeconds=0
+    )
+    await db.reset_tokens.create_index(
+    [("userId", 1)],
+    unique=True,
+    name="unique_active_reset_token",
+    partialFilterExpression={
+        "expires_at": {"$exists": True}
+    }
+
+)
+
 
     scheduler.start()
     try:
@@ -88,7 +108,7 @@ app = FastAPI(
 )
 app.add_middleware(RequestTimingMiddleware)
 
-app.add_middleware(SessionMiddleware, secret_key="some-random-string")
+app.add_middleware(SessionMiddleware, secret_key="not-some-random-string")
 redis_url = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL") \
     or f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/0"
 
@@ -101,9 +121,9 @@ storage = RedisStorage(
 limiter = FixedWindowRateLimiter(storage)
 
 RATE_LIMITS = {
-    "annonymous": parse("20/minute"),
-    "member": parse("60/minute"),
-    "admin": parse("140/minute"),
+    "annonymous": parse("120/minute"),
+    "member": parse("160/minute"),
+    "admin": parse("240/minute"),
 }
 
 async def get_user_type(request: Request) -> tuple[str, str]:
@@ -128,7 +148,8 @@ async def get_user_type(request: Request) -> tuple[str, str]:
         user_type = access_token.role
     except:
         try:
-            access_token  =await get_access_tokens_no_date_check(accessToken=token)
+            decoded_token =await decode_jwt_token(token=token,allow_expired=False)
+            access_token  =await get_access_tokens_no_date_check(accessToken=decoded_token['access_token'])
             user_id = access_token.userId
     
             user_type = access_token.role
@@ -220,7 +241,7 @@ async def test_scheduler(message):
    
     
 # Simple test route
-@app.get("/test",tags=["Health"])
+@app.get("/",tags=["Health"],include_in_schema=False)
 def root():
     run_time = datetime.now() + timedelta(seconds=20)
     scheduler.add_job(test_scheduler,"date",run_date=run_time,args=[f"test message {run_time}"],misfire_grace_time=31536000)
@@ -354,6 +375,23 @@ async def health_check():
         data={"status": overall_status, "services": services}
     )
 
+
+@app.get("/test_broadcast",tags=["ws"])
+async def test_ws_broadcast(pickup_lat:float,pickup_lon:float):
+    data ={
+  "pickup": {
+    "lat": pickup_lat,
+    "lon": pickup_lon
+  },
+  "dropoff": {
+    "lat": 9.0706,
+    "lon": 7.4675
+  },
+  "vehicle_type": "CAR",
+  "fare_estimate":123445,
+  "ride_id":"1234567897542"
+}
+    await broadcast_ride_request(pickup_lat=pickup_lat,pickup_lon=pickup_lon,ride_data=data)
 
 
 
@@ -536,10 +574,14 @@ async def health_check():
 from api.v1.admin_route import router as v1_admin_route_router
 from api.v1.driver import router as v1_driver_router
 from api.v1.rider_route import router as v1_rider_route_router
+from api.v1.payment import router as v1_payment_router
 
 
-
-app.include_router(v1_admin_route_router, prefix='/v1')
-app.include_router(v1_driver_router, prefix='/v1')
-app.include_router(v1_rider_route_router, prefix='/v1')
+app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=False)
+app.include_router(v1_driver_router, prefix='/api/v1')
+app.include_router(v1_rider_route_router, prefix='/api/v1')
+app.include_router(v1_payment_router, prefix='/api/v1')
 # --- auto-routes-end ---
+
+
+socket_app = socketio.ASGIApp(sio, other_asgi_app=app)

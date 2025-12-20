@@ -27,8 +27,12 @@ async def verify_token(token: str = Depends(token_auth_scheme))->accessTokenOut:
 
             
 async def verify_token_to_refresh(token: str = Depends(token_auth_scheme)):
-    result = await get_access_tokens_no_date_check(accessToken=token.credentials)
-    
+    tokens = await decode_jwt_token_without_expiration(token=token.credentials)
+    try:
+        result = await get_access_tokens_no_date_check(accessToken=tokens['access_token'])
+    except KeyError:
+        result = await get_access_tokens_no_date_check(accessToken=tokens['accessToken'])
+    print(result)
     if result==None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -40,9 +44,12 @@ async def verify_token_to_refresh(token: str = Depends(token_auth_scheme)):
     
 
 async def verify_token_rider_role(token: str = Depends(token_auth_scheme))->accessTokenOut:
+    decoded_token = await decode_jwt_token(token=token.credentials)
+   
     try:
-        
-        result = await get_access_tokens(accessToken=token.credentials)
+        decoded_token =await decode_jwt_token(token=token.credentials)
+        result = await get_access_tokens(accessToken=decoded_token['access_token'])
+       
         USER = await retrieve_rider_by_rider_id(id=result.userId)
         if USER and result!=None:
             return result
@@ -61,10 +68,13 @@ async def verify_token_rider_role(token: str = Depends(token_auth_scheme))->acce
  
             
 async def verify_token_driver_role(token: str = Depends(token_auth_scheme))->accessTokenOut:
+    decoded_token = await decode_jwt_token(token=token.credentials)
+     
+    
     try:
-        decoded_token =decode_jwt_token(token=token.credentials)
-        result = await get_access_tokens(accessToken=decoded_token.access_token)
-        driver = await retrieve_driver_by_driver_id(id=decoded_token.user_id)
+        
+        result = await get_access_tokens(accessToken=decoded_token['access_token'])
+        driver = await retrieve_driver_by_driver_id(id=result.userId)
         if driver and result!=None:
             return result
         
@@ -91,7 +101,7 @@ async def verify_admin_token(token: str = Depends(token_auth_scheme)):
         decoded_access_token = await decode_jwt_token(token=token.credentials)
         print("")
         print("")
-        print(decoded_access_token['accessToken'])
+      
         print("")
         print("")
         result = await get_admin_access_tokens(accessToken=decoded_access_token['accessToken'])

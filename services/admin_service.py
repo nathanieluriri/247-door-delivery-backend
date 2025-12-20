@@ -2,7 +2,7 @@
 from bson import ObjectId
 from fastapi import HTTPException
 from typing import List
-
+from bson.errors import InvalidId
 from repositories.admin_repo import (
     create_admin,
     get_admin,
@@ -10,11 +10,15 @@ from repositories.admin_repo import (
     update_admin,
     delete_admin,
 )
+from repositories.reset_token import create_reset_token, generate_otp, get_reset_token
 from schemas.admin_schema import AdminCreate, AdminUpdate, AdminOut,AdminBase,AdminRefresh
+from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, UserType
+from schemas.reset_token import ResetTokenBase, ResetTokenCreate
 from security.hash import check_password
 from repositories.tokens_repo import add_refresh_tokens, add_admin_access_tokens, accessTokenCreate,accessTokenOut,refreshTokenCreate
 from repositories.tokens_repo import get_refresh_tokens,get_access_tokens,delete_access_token,delete_refresh_token,delete_all_tokens_with_admin_id
 from security.encrypting_jwt import create_jwt_admin_token
+from services.email_service import send_otp
 async def add_admin(admin_data: AdminCreate) -> AdminOut:
     """adds an entry of AdminCreate to the database and returns an object
 
@@ -118,7 +122,7 @@ async def retrieve_admins(start=0,stop=100) -> List[AdminOut]:
     return await get_admins(start=start,stop=stop)
 
 
-async def update_admin_by_id(admin_id: str, admin_data: AdminUpdate) -> AdminOut:
+async def update_admin_by_id(admin_id: str, admin_data: AdminUpdate,is_password_getting_changed:bool=False) -> AdminOut:
     """_summary_
 
     Raises:
@@ -128,6 +132,8 @@ async def update_admin_by_id(admin_id: str, admin_data: AdminUpdate) -> AdminOut
     Returns:
         _type_: AdminOut
     """
+    from celery_worker import celery_app
+
     if not ObjectId.is_valid(admin_id):
         raise HTTPException(status_code=400, detail="Invalid admin ID format")
 
@@ -136,6 +142,95 @@ async def update_admin_by_id(admin_id: str, admin_data: AdminUpdate) -> AdminOut
 
     if not result:
         raise HTTPException(status_code=404, detail="Admin not found or update failed")
-
+    if is_password_getting_changed==True:
+        result = celery_app.send_task("celery_worker.run_async_task",args=["delete_tokens",{"userId": admin_id} ])
     return result
 
+
+
+async def admin_reset_password_initiation(
+    admin_details: ResetPasswordInitiation
+) -> ResetPasswordInitiationResponse:
+
+    admin = await get_admin(filter_dict={"email": admin_details.email})
+
+    if not admin:
+        raise HTTPException(
+            status_code=404,
+            detail="No admin has this email on the platform"
+        )
+
+    otp = generate_otp()
+    success = send_otp(otp=otp, user_email=admin_details.email)
+
+    if success != 0:
+        raise HTTPException(
+            status_code=500,
+            detail="OTP didn't send to the admin email"
+        )
+
+    token_base = ResetTokenBase(
+        userId=admin.id,
+        userType=UserType.admin,
+        otp=otp,
+    )
+
+    reset_token = await create_reset_token(
+        reset_token_data=ResetTokenCreate(**token_base.model_dump())
+    )
+
+    return ResetPasswordInitiationResponse(
+        resetToken=reset_token.id
+    )
+
+
+async def admin_reset_password_conclusion(
+    admin_details: ResetPasswordConclusion
+) -> bool:
+
+    # 1️⃣ Validate reset token ID
+    try:
+        reset_token_id = ObjectId(admin_details.resetToken)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid reset token")
+
+    # 2️⃣ Fetch token
+    token = await get_reset_token(filter_dict={"_id": reset_token_id})
+
+    if not token:
+        raise HTTPException(
+            status_code=404,
+            detail="Reset token not found or expired"
+        )
+
+    # 3️⃣ Validate user type
+    if token.userType != UserType.admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Reset token is not for an admin"
+        )
+
+    # 4️⃣ Validate OTP
+    if token.otp != admin_details.otp:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OTP"
+        )
+
+    # 5️⃣ Update admin password
+    admin_update = AdminUpdate(
+        password=admin_details.password
+    )
+
+    result = await update_admin(
+        {"_id": ObjectId(token.userId)},
+        admin_update
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update admin password"
+        )
+
+    return True
