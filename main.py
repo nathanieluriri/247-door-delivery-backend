@@ -24,8 +24,10 @@ from starlette.middleware.sessions import SessionMiddleware
 from core.database import db
 from security.encrypting_jwt import decode_jwt_token
 from redis_om import Migrator
-
+from starlette.concurrency import run_in_threadpool
 from web_socket_handler.broadcasts.nearby_drivers import broadcast_ride_request
+
+
 MONGO_URI = os.getenv("MONGO_URL")
 REDIS_URI = f"redis://{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/0"
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
@@ -49,6 +51,7 @@ async def lifespan(app:FastAPI):
         name="APScheduler Heartbeat",
         replace_existing=True
     )
+    
     Migrator().run()
     
     await db.stripe_events.create_index(
@@ -579,8 +582,8 @@ from api.v1.payment import router as v1_payment_router
 
 app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=False)
 app.include_router(v1_driver_router, prefix='/api/v1')
-app.include_router(v1_rider_route_router, prefix='/api/v1')
-app.include_router(v1_payment_router, prefix='/api/v1')
+app.include_router(v1_rider_route_router, prefix='/api/v1',include_in_schema=False)
+app.include_router(v1_payment_router, prefix='/api/v1',include_in_schema=False)
 # --- auto-routes-end ---
 
 

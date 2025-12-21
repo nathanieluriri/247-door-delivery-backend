@@ -11,6 +11,8 @@ from bson import ObjectId
 from fastapi import HTTPException
 from bson.errors import InvalidId
 from typing import List
+from core.redis_cache import async_redis
+import json
 
 from repositories.reset_token import(
     create_reset_token,
@@ -304,3 +306,51 @@ async def ban_drivers(user_id: str, user:dict) -> dict:
     update =await update_driver_by_id_admin_func(user_id=user_id,user_data=user_data)
     rider = await retrieve_driver_by_driver_id(id=user_id)
     send_ban_warning(rider.firstName,rider.lastName)
+    
+    
+    
+    
+# -----------------------------------------
+# ------------ NOTIFICATION LOGIC ---------
+# -----------------------------------------
+    
+async def notify_all_drivers_new_ride(
+    ride_id: str,
+    pickup: str,
+    destination: str,
+    fare: int,
+):
+    payload = {
+        "event": "ride_request",
+        "ride_id": ride_id,
+        "pickup": pickup,
+        "destination": destination,
+        "fare": fare,
+    }
+
+    await async_redis.publish(
+        "drivers:all",
+        json.dumps(payload)
+    )
+    
+    
+
+async def notify_driver_new_ride(
+    driver_id: str,
+    ride_id: str,
+    pickup: str,
+    destination: str,
+    fare: int,
+):
+    payload = {
+        "event": "ride_request",
+        "ride_id": ride_id,
+        "pickup": pickup,
+        "destination": destination,
+        "fare": fare,
+    }
+
+    await async_redis.publish(
+        f"driver:{driver_id}:events",
+        json.dumps(payload)
+    )
