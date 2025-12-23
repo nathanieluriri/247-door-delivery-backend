@@ -106,7 +106,7 @@ async def add_ride(
     )
     return ride
 
-# TODO: IF A RIDE IS CANCELD ASK USER IF THEY WANT TO FIND ANOTHER DRIVER FOR THE RIDE OR COLLECT A REFUND
+
  
 async def add_ride_admin_func(
     ride_data: RideCreate,
@@ -415,7 +415,8 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
     result = await update_ride(filter_dict, ride_data)
     if not result:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")
-    
+    # TODO: HAVE A LOGIC CASE FOR CONTAINING
+     
     # Emit WebSocket status update if status changed
     if ride_data.rideStatus is not None and current_ride and ride_data.rideStatus != current_ride.rideStatus:
         try:            

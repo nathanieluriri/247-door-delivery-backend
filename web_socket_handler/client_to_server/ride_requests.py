@@ -1,6 +1,6 @@
 # Handles: ride:request, ride:cancel_request
 from web_socket_handler.base import sio
-from web_socket_handler.utils import handle_accept_logic, handle_complete_logic, handle_start_logic, is_driver, is_rider
+from web_socket_handler.utils import handle_accept_logic, handle_complete_logic, handle_start_logic, is_driver, is_rider,handle_cancel_ride_logic
 from web_socket_handler.schemas.messages import (
     AcceptRideRequest, AcceptRideResponse,
     StartRideRequest, StartRideResponse,
@@ -73,11 +73,7 @@ async def cancel_ride(sid, data):
         ride_id = data.get('ride_id')
         reason = data.get('reason', 'Unknown')
 
-        sio.leave_room(sid, room=f"ride_{ride_id}")
-
-        # Notify others if needed
-        update = RideStatusUpdate(status="CANCELLED", data={"reason": reason})
-        await sio.emit("ride_status_update", update.model_dump(), room=f"ride_{ride_id}")
+        await handle_cancel_ride_logic(sid, ride_id, reason, "DRIVER")
 
     except Exception as e:
         print(f"❌ Error in cancel_ride: {e}")

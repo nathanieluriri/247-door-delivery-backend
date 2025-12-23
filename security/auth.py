@@ -2,7 +2,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
 from security.tokens import validate_admin_accesstoken,validate_admin_accesstoken_otp,generate_refresh_tokens,generate_member_access_tokens, validate_member_accesstoken, validate_refreshToken,validate_member_accesstoken_without_expiration,generate_admin_access_tokens,validate_expired_admin_accesstoken
-from security.encrypting_jwt import decode_jwt_token,decode_jwt_token_without_expiration
+from security.encrypting_jwt import JWTPayload, decode_jwt_token,decode_jwt_token_without_expiration
 from repositories.tokens_repo import get_access_tokens,get_access_tokens_no_date_check
 from schemas.tokens_schema import refreshedToken,accessTokenOut
 from services.driver_service import retrieve_driver_by_driver_id
@@ -10,17 +10,25 @@ from services.rider_service import retrieve_rider_by_rider_id
 
 
 token_auth_scheme = HTTPBearer()
-
+JWTPayload
 async def verify_token(token: str = Depends(token_auth_scheme))->accessTokenOut:
-    result = await get_access_tokens(accessToken=token.credentials)
+    decoded_token = await decode_jwt_token(token=token.credentials)
     
-    if result==None:
+    if decoded_token['user_type']=="RIDER":
+        
+        RIDER = await retrieve_rider_by_rider_id(id=decoded_token['user_id'])
+        if RIDER:
+            return JWTPayload(**decoded_token)
+    elif decoded_token['user_type']=="DRIVER":
+        DRIVER = await retrieve_driver_by_driver_id(id=decoded_token['user_id'])
+        if DRIVER:
+            return JWTPayload(**decoded_token)
+    elif decoded_token==None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
-    else:
-        return result
+     
             
             
 

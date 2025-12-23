@@ -9,6 +9,7 @@ from core.redis_cache import cache_db
 from web_socket_handler.schemas.messages import (
     JoinRideRoomRequest, JoinRideRoomResponse,
     GetRideStateRequest, GetRideStateResponse,
+    CancelRideRequest, CancelRideResponse,
     ErrorResponse
 )
 
@@ -71,3 +72,45 @@ async def get_ride_state(sid, data):
 
     await sio.emit("get_ride_state_response", response.model_dump(), to=sid)
     print("after last emission ",response)
+
+@sio.event
+async def cancel_ride(sid, data):
+    """
+    Client -> Server: Rider cancels their ride request.
+    Expected data: { "ride_id": "12345", "reason": "Changed my mind" }
+    """
+    if not is_rider(sid=sid):
+        response = ErrorResponse(message="Unauthorized", detail="This event is for riders")
+        await sio.emit("cancel_ride_response", response.model_dump(), to=sid)
+        return
+
+    try:
+        req = CancelRideRequest(**data)
+        rider = ActiveRiders.find(ActiveRiders.sid == sid).first()
+
+        # Update ride status to canceled
+        from schemas.ride import RideUpdate
+        from schemas.imports import RideStatus
+        from services.ride_service import update_ride_by_id
+
+        ride_update = RideUpdate(rideStatus=RideStatus.canceled)
+        await update_ride_by_id(
+            ride_id=req.ride_id,
+            ride_data=ride_update,
+            rider_id=rider.user_id
+        )
+
+        # Leave the ride room
+        sio.leave_room(sid, f"ride_{req.ride_id}")
+
+        # Notify others in the room
+        from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
+        await emit_ride_status_update(req.ride_id, RideStatus.canceled, {"reason": req.reason or "Rider canceled"})
+
+        response = CancelRideResponse(status="success", message="Ride canceled successfully")
+
+    except Exception as e:
+        print(f"❌ Error canceling ride: {e}")
+        response = CancelRideResponse(status="error", message="Failed to cancel ride")
+
+    await sio.emit("cancel_ride_response", response.model_dump(), to=sid)

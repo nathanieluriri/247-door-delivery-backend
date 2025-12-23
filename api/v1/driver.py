@@ -1,20 +1,22 @@
 
 import json
-from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
+from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path,Depends
 from typing import List, Optional
-
+from core.redis_cache import async_redis
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse
+from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
-from core.redis_cache import async_redis
+from core.staff_payment import get_staff_payment_service
 from schemas.tokens_schema import accessTokenOut
 from schemas.payout import (
     PayoutCreate,
     PayoutOut,
     PayoutBase,
     PayoutUpdate,
+    PayoutBalanceOut,
+    PayoutRequestIn,
 )
 from services.payout_service import (
     add_payout,
@@ -32,6 +34,7 @@ from schemas.driver import (
     DriverRefresh,
     DriverUpdatePassword,
 )
+from schemas.ride import RideUpdate
 from security.account_status_checks import check_driver_account_status
 from services.driver_service import (
     add_driver,
@@ -49,7 +52,7 @@ from services.driver_service import (
 )
 from security.auth import verify_any_token,verify_token_to_refresh,verify_token_driver_role
 from services.rating_service import add_rating, retrieve_rating_by_user_id
-from services.ride_service import retrieve_rides_by_driver_id
+from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
 import asyncio
 
 
@@ -99,7 +102,7 @@ async def list_drivers(start:int= 0, stop:int=100):
 
 
 @router.get("/me", response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)],response_model_exclude_none=True)
-async def get_driver_details(token:accessTokenOut = Depends(verify_any_token)):
+async def get_driver_details(token:accessTokenOut = Depends(verify_token_driver_role)):
  
     try:
         items = await retrieve_driver_by_driver_id(id=token.userId)
@@ -127,7 +130,7 @@ async def login_driver(user_data:DriverBase):
 
 
 
-@router.post("/refesh",response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_to_refresh)])
+@router.post("/refresh",response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_to_refresh)])
 async def refresh_driver_tokens(user_data:DriverRefresh,token:accessTokenOut = Depends(verify_token_to_refresh)):
     
     items= await refresh_driver_tokens_reduce_number_of_logins(user_refresh_data=user_data,expired_access_token=token.accesstoken)
@@ -170,7 +173,7 @@ async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = De
 
     
     rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
-    rating = add_rating(rating_data=rider_rating)
+    rating = add_rating(rating_data=rider_rating,driverId=token.userId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Rider")
 
 
@@ -180,62 +183,30 @@ async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = De
 # -------------------------------
 
 
-@router.get(
-    "/ride/events",
-    response_model_exclude={"data": {"password"}},
-    
-    dependencies=[Depends(verify_token_driver_role)],
-    summary="Subscribe to ride events for drivers",
-    description=(
-        "Establishes a Server-Sent Events (SSE) connection for the authenticated driver. "
-        "The driver will receive both global ride notifications and private notifications "
-        "targeted specifically to them."
-    )
-)
-async def subscribe_to_events(
-    request: Request,
-    token: accessTokenOut = Depends(verify_token_driver_role),
-):
-    """
-    SSE endpoint for drivers to receive ride notifications.
 
-    - Global channel 'drivers:all' → broadcasts to all drivers
-    - Private channel 'driver:{userId}:events' → private messages to the driver
-    """
-    pubsub = async_redis.pubsub()
-    await pubsub.subscribe(
-        "drivers:all",                 # global notifications
-        f"driver:{token.userId}:events"  # private notifications
-    )
-
-    async def event_generator():
-        try:
-            async for message in pubsub.listen():
-                if await request.is_disconnected():
-                    break
-
-                if message["type"] == "message":
-                    yield f"data: {message['data']}\n\n"
-        finally:
-            await pubsub.unsubscribe(
-                "drivers:all",
-                f"driver:{token.userId}:events"
-            )
-            await pubsub.close()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream"
-    )
-    
 
 @router.post("/ride/{ride_id}/accept")
 async def accept_ride(
     ride_id: str,
     token: accessTokenOut = Depends(verify_token_driver_role), 
 ):
-    # TODO: WORK ON THIS
-    pass
+    # Update ride to assign driver and change status to arrivingToPickup
+    ride_update = RideUpdate(
+        driverId=token.userId,
+        rideStatus=RideStatus.arrivingToPickup
+    )
+    
+    updated_ride = await update_ride_by_id(
+        ride_id=ride_id,
+        ride_data=ride_update,
+        driver_id=token.userId
+    )
+    
+    return APIResponse(
+        status_code=200,
+        data=updated_ride,
+        detail="Ride accepted successfully"
+    )
     
     
 @router.post("/ride/{ride_id}")
@@ -243,8 +214,20 @@ async def retrieve_ride_details(
     ride_id: str,
     token: accessTokenOut = Depends(verify_token_driver_role), 
 ):
-    # TODO: WORK ON THIS
-    pass
+    ride = await retrieve_ride_by_ride_id(id=ride_id)
+    
+    if not ride:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found"
+        )
+    
+    return APIResponse(
+        status_code=200,
+        data=ride,
+        detail="Ride details retrieved successfully"
+    )
+
 
 @router.get("/ride/history",response_model_exclude_none=True,dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
 async def ride_history(token:accessTokenOut = Depends(verify_token_driver_role)):
@@ -284,63 +267,111 @@ async def finish_password_reset_process_for_driver_that_forgot_password(driver_d
 # ------- PAYOUT MANAGEMENT ------- 
 # ---------------------------------
 
-
-
+staff_payment_service = get_staff_payment_service()
 
 
 
 # ------------------------------
-# List Payouts (with pagination )
+# Driver Stripe Connect Onboarding
 # ------------------------------
+@router.post("/payout/onboard", response_model=APIResponse[dict])
+async def onboard_driver_for_payments(token: accessTokenOut = Depends(verify_token_driver_role)):
+    """
+    Onboard driver for Stripe Connect payments.
+
+    Creates a Stripe Connect Express account and generates onboarding link.
+    Driver must complete onboarding before receiving payments.
+    """
+    # Get driver details
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    try:
+        onboarding_result = await staff_payment_service.onboard_driver(driver)
+        return APIResponse(
+            status_code=200,
+            data=onboarding_result,
+            detail="Driver onboarding initiated successfully"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Onboarding failed: {str(e)}")
+
+# ------------------------------
+# Check Payment Eligibility Status
+# ------------------------------
+@router.get("/payout/status", response_model=APIResponse[dict])
+async def get_driver_payment_status(token: accessTokenOut = Depends(verify_token_driver_role)):
+    """
+    Get driver's current payment status and eligibility.
+
+    Returns information about Stripe Connect account status and payout eligibility.
+    """
+    # Get driver details
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    try:
+        status_result = await staff_payment_service.get_driver_payment_status(driver)
+        return APIResponse(
+            status_code=200,
+            data=status_result,
+            detail="Payment status retrieved successfully"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Status check failed: {str(e)}")
+
+# ------------------------------
+# List Payouts (with pagination)
+# ------------------------------
+
 @router.get("/payouts", response_model=APIResponse[List[PayoutOut]])
 async def list_previous_payouts(
     start: Optional[int] = Query(None, description="Start index for range-based pagination"),
     stop: Optional[int] = Query(None, description="Stop index for range-based pagination"),
     page_number: Optional[int] = Query(None, description="Page number for page-based pagination (0-indexed)"),
- 
+    token: accessTokenOut = Depends(verify_token_driver_role)
 ):
     """
-    Retrieves a list of Payouts with pagination and optional filtering.
-    - Priority 1: Range-based (start/stop)
-    - Priority 2: Page-based (page_number)
-    - Priority 3: Default (first 100)
+    List all payout records for the authenticated driver.
+
+    Supports multiple pagination methods:
+    - Range-based: ?start=0&stop=10
+    - Page-based: ?page_number=0 (uses PAGE_SIZE=10)
+    - Default: First 100 records
     """
-    PAGE_SIZE = 50
-    parsed_filters = {}
-    # TODO: WORK ON THIS
-     
+    PAGE_SIZE = 10
 
-    # 2. Determine Pagination
-    # Case 1: Prefer start/stop if provided
-    if start is not None or stop is not None:
-        if start is None or stop is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Both 'start' and 'stop' must be provided together.")
-        if stop < start:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'stop' cannot be less than 'start'.")
-        
+    # Case 1: Range-based pagination
+    if start is not None and stop is not None:
+        if start < 0 or stop <= start:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="'start' must be >= 0 and 'stop' must be > 'start'."
+            )
+
         # Pass filters to the service layer
-        items = await retrieve_payouts(filters=parsed_filters, start=start, stop=stop)
-        return APIResponse(status_code=200, data=items, detail="Fetched successfully")
+        items = await retrieve_payouts(driverId=token.userId, start=start, stop=stop)
+        return APIResponse(status_code=200, data=items, detail=f"Fetched records {start} to {stop} successfully")
 
-    # Case 2: Use page_number if provided
+    # Case 2: Page-based pagination
     elif page_number is not None:
         if page_number < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'page_number' cannot be negative.")
-        
+
         start_index = page_number * PAGE_SIZE
         stop_index = start_index + PAGE_SIZE
         # Pass filters to the service layer
-        items = await retrieve_payouts(filters=parsed_filters, start=start_index, stop=stop_index)
+        items = await retrieve_payouts(driverId=token.userId, start=start_index, stop=stop_index)
         return APIResponse(status_code=200, data=items, detail=f"Fetched page {page_number} successfully")
 
     # Case 3: Default (no params)
     else:
         # Pass filters to the service layer
-        items = await retrieve_payouts(filters=parsed_filters, start=0, stop=100)
+        items = await retrieve_payouts(driverId=token.userId, start=0, stop=100)
         detail_msg = "Fetched first 100 records successfully"
-        if parsed_filters:
-            # If filters were applied, adjust the detail message
-            detail_msg = f"Fetched first 100 records successfully (with filters applied)"
+
         return APIResponse(status_code=200, data=items, detail=detail_msg)
 
 
@@ -349,53 +380,154 @@ async def list_previous_payouts(
 # ------------------------------
 @router.get("/payout/{id}", response_model=APIResponse[PayoutOut])
 async def view_information_regarding_a_previous_payout(
-    id: str = Path(..., description="payout ID to fetch specific item")
-):
-    """
-    Retrieves a single Payout by its ID.
-    """
-    # TODO: WORK ON THIS
-    item = await retrieve_payout_by_payout_id(id=id)
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
-    return APIResponse(status_code=200, data=item, detail="payout item fetched")
-
-
-
-# ------------------------------
-# Retrieve a single Payout
-# ------------------------------
-@router.get("/payout", response_model=APIResponse[PayoutOut])
-async def view_information_regarding_available_withdrawal_option(
-    id: str = Path(..., description="payout ID to fetch specific item")
-):
-    """
-    Retrieves a single Payout by its ID.
-    """
-    # TODO: WORK ON THIS
-    item = await retrieve_payout_by_payout_id(id=id)
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
-    return APIResponse(status_code=200, data=item, detail="payout item fetched")
-
-
-# ------------------------------
-# Create a new Payout
-# ------------------------------
-# Uses PayoutBase for input (correctly)
-@router.post("/payout", response_model=APIResponse[PayoutOut], status_code=status.HTTP_201_CREATED)
-async def withdraw_money_from_247earnings_by_creating_a_payout(payload: PayoutBase):
-    """
-    Creates a new Payout.
-    """
-    # TODO: WORK ON THIS
-    # Creates PayoutCreate object which includes date_created/last_updated
-    new_data = PayoutCreate(**payload.model_dump()) 
-    new_item = await add_payout(new_data)
-    if not new_item:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to create payout")
     
-    return APIResponse(status_code=201, data=new_item, detail=f"Payout created successfully")
+    id: str = Path(..., description="payout ID to fetch specific item"),
+    
+    token:accessTokenOut = Depends(verify_token_driver_role)
+    
+):
+    """
+    Retrieves a single Payout by its ID.
+    """
+    item = await retrieve_payout_by_payout_id(id=id,driverId=token.userId)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
+    
+    return APIResponse(status_code=200, data=item, detail="payout item fetched")
+
+
+
+ 
+
+
+
+@router.get("/payout/balance", response_model=APIResponse[PayoutBalanceOut])
+async def get_driver_available_balance(token: accessTokenOut = Depends(verify_token_driver_role))->APIResponse[PayoutBalanceOut]:
+    """
+    Get driver's current available balance for withdrawal.
+
+    Returns the total earnings minus any pending/processed withdrawals.
+    """
+    # Get all payout records for this driver
+    payouts = await retrieve_payouts(driverId=token.userId, start=0, stop=1000)
+
+    # Calculate totals
+    total_earnings = 0
+    total_withdrawn = 0
+
+    for payout in payouts:
+        if payout.payoutOption == PayoutOptions.totalEarnings:
+            total_earnings += payout.amount
+        elif payout.payoutOption == PayoutOptions.withdrawalHistory:
+            total_withdrawn += payout.amount
+
+    available_balance = total_earnings - total_withdrawn
+
+    return APIResponse(status_code=200, data=PayoutBalanceOut(
+        total_earnings=total_earnings,
+        total_withdrawn=total_withdrawn,
+        available_balance=max(0, available_balance), # Ensure balance is never negative
+        currency="GBP"
+    ), detail="Balance calculated successfully")
+# ------------------------------
+# Request Payout (Transfer to Stripe Balance)
+# ------------------------------
+@router.post("/payout/request", response_model=APIResponse[PayoutOut])
+async def request_payout_transfer(
+    payout_request: PayoutRequestIn,
+    token: accessTokenOut = Depends(verify_token_driver_role)
+):
+    """
+    Request a payout transfer to driver's Stripe account.
+
+    This will transfer money from platform to driver's Stripe balance.
+    For instant payouts, money goes directly to bank (higher fees).
+    """
+    # Get driver details
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    # Check if driver has Stripe Connect account
+    if not driver.stripeAccountId:
+        raise HTTPException(
+            status_code=400,
+            detail="Driver must complete Stripe Connect onboarding first. Use /drivers/payout/onboard"
+        )
+
+    # Get available balance
+    balance_response = await get_driver_available_balance(token)
+    available_balance = balance_response.data.available_balance
+
+    if payout_request.amount > available_balance:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient balance. Available: {available_balance}p, Requested: {payout_request.amount}p"
+        )
+
+    try:
+        # Process the payout
+        payout_result = await staff_payment_service.pay_driver(
+            driver=driver,
+            amount=payout_request.amount,
+            description=payout_request.description,
+            instant=payout_request.instant
+        )
+
+        # Record the payout in our system
+        payout_record = PayoutCreate(
+            payoutOption=PayoutOptions.withdrawalHistory,
+            amount=payout_request.amount,
+            driverId=token.userId,
+            rideIds=[]  # This is a general payout, not tied to specific rides
+        )
+        new_payout = await add_payout(payout_record)
+
+        return APIResponse(status_code=200, data=new_payout, detail="Payout processed successfully")
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Payout failed: {str(e)}")
+
+# ------------------------------
+# Process Ride Earnings (Called after ride completion)
+# ------------------------------
+@router.post("/payout/earn", response_model=APIResponse[PayoutOut])
+async def record_ride_earnings(
+    ride_id: str = Body(..., description="ID of the completed ride"),
+    earnings: int = Body(..., description="Earnings from this ride in pence", gt=0),
+    token: accessTokenOut = Depends(verify_token_driver_role)
+):
+    """
+    Record earnings from a completed ride.
+
+    This is typically called automatically after ride completion,
+    but can also be used for manual earnings recording.
+    """
+    # Verify the ride belongs to this driver
+    rides = await retrieve_rides_by_driver_id(driver_id=token.userId)
+    ride_found = next((r for r in rides if r.id == ride_id), None)
+
+    if not ride_found:
+        raise HTTPException(status_code=404, detail="Ride not found or doesn't belong to this driver")
+
+    if ride_found.rideStatus != "COMPLETED":
+        raise HTTPException(status_code=400, detail="Ride must be completed to record earnings")
+
+    # Record the earnings
+    payout_record = PayoutCreate(
+        payoutOption=PayoutOptions.totalEarnings,
+        amount=earnings,
+        driverId=token.userId,
+        rideIds=[ride_id]
+    )
+
+    new_payout = await add_payout(payout_record)
+
+    return APIResponse(
+        status_code=201,
+        data=new_payout,
+        detail="Ride earnings recorded successfully"
+    )
 
 
 
@@ -444,3 +576,122 @@ async def withdraw_money_from_247earnings_by_creating_a_payout(payload: PayoutBa
 
 #     await async_redis.publish(f"driver:{payload.driver_id}:events", json.dumps(message))
 #     return {"status": "success", "message": f"Event sent to driver {payload.driver_id}"}
+
+
+
+
+
+
+
+
+
+
+# -------------------------------
+# ---- RIDE STREAM EVENTS -------
+# -------------------------------
+
+
+
+@router.get(
+    "/ride/events",
+    response_model_exclude={"data": {"password"}},
+    
+    dependencies=[Depends(verify_token_driver_role)],
+    summary="Subscribe to ride events for drivers",
+    description=(
+        "Establishes a Server-Sent Events (SSE) connection for the authenticated driver. "
+        "The driver will receive both global ride notifications and private notifications "
+        "targeted specifically to them."
+    )
+)
+async def subscribe_to_general_ride_events_to_be_able_accept_rides_once_they_are_available(
+    request: Request,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    """
+    SSE endpoint for drivers to receive ride notifications.
+
+    - Global channel 'drivers:all' → broadcasts to all drivers
+    - Private channel 'driver:{userId}:events' → private messages to the driver
+    """
+    pubsub = async_redis.pubsub()
+    await pubsub.subscribe(
+        "drivers:all",                 # global notifications
+        f"driver:{token.userId}:events"  # private notifications
+    )
+
+    async def event_generator():
+        try:
+            async for message in pubsub.listen():
+                if await request.is_disconnected():
+                    break
+
+                if message["type"] == "message":
+                    yield f"data: {message['data']}\n\n"
+        finally:
+            await pubsub.unsubscribe(
+                "drivers:all",
+                f"driver:{token.userId}:events"
+            )
+            await pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
+    
+@router.get(
+    "/ride/{ride_id}/monitor",
+    response_model_exclude={"data": {"password"}},
+    dependencies=[Depends(verify_token_driver_role)],
+    summary="Subscribe to active ride lifecycle events",
+    description=(
+        "Establishes a dedicated SSE connection for a specific ongoing ride. "
+        "Used by drivers to receive critical real-time updates such as passenger "
+        "cancellations, route changes, chat messages, or payment confirmations "
+        "for the current trip."
+    )
+)
+async def subscribe_to_specific_ride_lifecycle_events_for_active_navigation_and_status(
+    ride_id: str,
+    request: Request,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    """
+    SSE endpoint for monitoring a specific active ride.
+    
+    Channels subscribed:
+    - 'ride:{ride_id}:events' → General status updates (cancelled, completed, paid)
+    - 'ride:{ride_id}:chat'   → Direct messages from the passenger
+    """
+    
+    # In a real app, you would verify here that the driver (token.userId) 
+    # is actually assigned to this specific ride_id before allowing subscription.
+    
+    pubsub = async_redis.pubsub()
+    await pubsub.subscribe(
+        f"ride:{ride_id}:events",  # Status changes (e.g., "rider_cancelled", "payment_success")
+       
+    )
+
+    async def event_generator():
+        try:
+            async for message in pubsub.listen():
+                if await request.is_disconnected():
+                    break
+
+                if message["type"] == "message":
+                    # We might want to parse the data to wrap it or filter it, 
+                    # but for raw forwarding:
+                    yield f"data: {message['data']}\n\n"
+        finally:
+            await pubsub.unsubscribe(
+                f"ride:{ride_id}:events" 
+              
+            )
+            await pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )

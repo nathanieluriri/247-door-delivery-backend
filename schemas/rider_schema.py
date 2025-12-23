@@ -59,7 +59,7 @@ class RiderOut(RiderBase):
     # Add other fields here 
     firstName:Optional[str]=''
     lastName:Optional[str]='' 
-    accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
+    accountStatus:Optional[AccountStatus]=AccountStatus.ACTIVE
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

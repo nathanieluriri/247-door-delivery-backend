@@ -25,7 +25,7 @@ from schemas.rating import RatingCreate, RatingUpdate, RatingOut
 from schemas.imports import RideStatus
 
 
-async def add_rating(rating_data: RatingCreate) -> RatingOut:
+async def add_rating(rating_data: RatingCreate,driverId:str=None,riderId:str=None) -> RatingOut:
     """adds an entry of RatingCreate to the database and returns an object
 
     Returns:
@@ -34,9 +34,18 @@ async def add_rating(rating_data: RatingCreate) -> RatingOut:
    
    
     ride= await retrieve_ride_by_ride_id(id= rating_data.rideId)
-    if ride.rideStatus==RideStatus.completed:
-        return await create_rating(rating_data)
-
+    if driverId!=None and riderId==None:
+        if ride.rideStatus==RideStatus.completed and ride.driverId==driverId:
+            return await create_rating(rating_data)
+        
+    elif driverId==None and riderId!=None:
+        if ride.rideStatus==RideStatus.completed and ride.driverId==driverId:
+            return await create_rating(rating_data) 
+        
+    elif driverId==None and riderId==None:
+        raise HTTPException(status_code=400,detail="Driver Id or Rider Id required for rating ride")
+    
+    else: raise HTTPException(status_code=400,detail="error in add_rating function")
 
 async def remove_rating(rating_id: str):
     """deletes a field from the database and removes RatingCreateobject 

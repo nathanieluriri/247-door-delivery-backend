@@ -62,7 +62,7 @@ async def add_rider(user_data: RiderCreate) -> RiderOut:
         new_rider.password=""
         
         token_activation = True
-        token = create_jwt_token(access_token=access_token.accesstoken,user_id=user.id,user_type="RIDER",is_activated=token_activation) 
+        token = create_jwt_token(access_token=access_token.accesstoken,user_id=new_rider.id,user_type="RIDER",is_activated=token_activation) 
         new_rider.refresh_token = refresh_token.refreshtoken
         new_rider.access_token= token
         return new_rider

@@ -11,18 +11,68 @@ from schemas.imports import *
 from pydantic import Field
 import time
 
+# Base model to represent payout records
 class PayoutBase(BaseModel):
-    # Add other fields here 
-    pass
+    payoutOption: PayoutOptions  # Type of payout (earnings, withdrawable, or withdrawal)
+    amount: float  # Amount for the payout
+    rideIds: Optional[List[str]] = []  # List of ride IDs (only for earnings payouts)
+    driverId: str  # User ID (driver or rider)
+    
+    # Method to calculate total earnings (if needed for reporting)
+    def calculate_total_amount(self) -> float:
+        return self.amount  # In case there's additional logic for calculating totals
+    
+    # Method to track ride completion and earnings
+    def add_ride(self, ride_id: str):
+        if self.payoutOption == PayoutOptions.totalEarnings:
+            self.ride_ids.append(ride_id)
 
+# Payout creation model (when a payout record is created after a ride or withdrawal)
 class PayoutCreate(PayoutBase):
-    # Add other fields here 
-    date_created: int = Field(default_factory=lambda: int(time.time()))
-    last_updated: int = Field(default_factory=lambda: int(time.time()))
+    date_created: int = Field(default_factory=lambda: int(time.time()))  # Automatically set the creation timestamp
+    last_updated: int = Field(default_factory=lambda: int(time.time()))  # Automatically set the last updated timestamp
 
+    def add_ride_to_earnings(self, ride_id: str):
+        # Add completed ride to earnings list and update total earnings
+        if self.payoutOption == PayoutOptions.totalEarnings:
+            self.add_ride(ride_id)
+            self.last_updated = int(time.time())  # Update the timestamp
+
+    def update_balance_after_withdrawal(self, withdrawal_amount: float):
+        # Logic for updating withdrawable balance after a withdrawal
+        if self.payoutOption == PayoutOptions.withdrawalHistory:
+            self.amount -= withdrawal_amount
+            self.last_updated = int(time.time())  # Update timestamp after withdrawal
+
+# Payout update model (when we update existing payouts)
 class PayoutUpdate(BaseModel):
-    # Add other fields here 
-    last_updated: int = Field(default_factory=lambda: int(time.time()))
+    payoutOption: Optional[PayoutOptions]  # Update the payout option type if needed
+    amount: Optional[float]  # Update the amount (e.g., after a withdrawal)
+    rideIds: Optional[List[str]]  # Optionally update the ride IDs (only for totalEarnings)
+    last_updated: int = Field(default_factory=lambda: int(time.time()))  # Update the timestamp
+
+class PayoutBalanceOut(BaseModel):
+    currency: str
+    available_balance: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("available_balance", "availableBalance"),
+        serialization_alias="availableBalance",
+    )
+    total_withdrawn: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("total_withdrawn", "totalWithdrawn"),
+        serialization_alias="totalWithdrawn",
+    )
+    total_earnings: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("total_earnings", "totalEarnings"),
+        serialization_alias="totalEarnings",
+    )
+
+class PayoutRequestIn(BaseModel):
+    amount: int = Field(..., description="Amount to payout in smallest currency unit (e.g., pence for GBP)", gt=0)
+    description: Optional[str] = Field(None, description="Description for the payout")
+    instant: bool = Field(False, description="Whether to request an instant payout (higher fees)")
 
 class PayoutOut(PayoutBase):
     # Add other fields here 

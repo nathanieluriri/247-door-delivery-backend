@@ -47,7 +47,7 @@ async def remove_payout(payout_id: str):
 
     else: return True
     
-async def retrieve_payout_by_payout_id(id: str) -> PayoutOut:
+async def retrieve_payout_by_payout_id(id: str,driverId:str) -> PayoutOut:
     """Retrieves payout object based specific Id 
 
     Raises:
@@ -60,7 +60,7 @@ async def retrieve_payout_by_payout_id(id: str) -> PayoutOut:
     if not ObjectId.is_valid(id):
         raise HTTPException(status_code=400, detail="Invalid payout ID format")
 
-    filter_dict = {"_id": ObjectId(id)}
+    filter_dict = {"_id": ObjectId(id),"driverId":driverId}
     result = await get_payout(filter_dict)
 
     if not result:
@@ -68,14 +68,20 @@ async def retrieve_payout_by_payout_id(id: str) -> PayoutOut:
 
     return result
 
+ 
 
-async def retrieve_payouts(start=0,stop=100) -> List[PayoutOut]:
+async def retrieve_payouts(driverId:str,start=0,stop=100) -> List[PayoutOut]:
     """Retrieves PayoutOut Objects in a list
 
     Returns:
         _type_: PayoutOut
     """
-    return await get_payouts(start=start,stop=stop)
+    if not ObjectId.is_valid(driverId):
+        raise HTTPException(status_code=400, detail="Invalid payout ID format")
+
+    filter_dict = {"driverId":driverId}
+    result = await get_payouts(filter_dict,start=start,stop=stop)
+    return result
 
 
 async def update_payout_by_id(payout_id: str, payout_data: PayoutUpdate) -> PayoutOut:

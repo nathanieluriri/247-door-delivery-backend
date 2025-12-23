@@ -160,16 +160,16 @@ def is_driver(sid: str, require_on_duty: bool = False) -> bool:
 async def handle_accept_logic(sid,ride_id):
     driver = ActiveDrivers.find(ActiveDrivers.sid == sid).first()
     ride_data = RideUpdate(driverId=driver.user_id,rideStatus=RideStatus.arrivingToPickup)
-    await update_ride_by_id(ride_id=ride_id,driver_id=driver.user_id,ride_data=ride_data) 
+    await update_ride_by_id(ride_id=ride_id,driver_id=driver.user_id,ride_data=ride_data)
     driver_info = await retrieve_driver_by_driver_id(id=driver.user_id)
     d =driver_info.model_dump()
     ratings = await retrieve_rating_by_user_id(user_id=driver_info.id)
     d["Ratings"]= ratings.model_dump()
-    
-    # Emit status update
-    
-    await emit_ride_status_update(ride_id, RideStatus.arrivingToPickup, d, 10)
-    
+
+    # Emit status update with driver assignment
+    from web_socket_handler.server_to_client.ride_updates import emit_ride_assigned
+    await emit_ride_assigned(ride_id, d, 10)
+
     return d
 
 
@@ -177,20 +177,52 @@ async def handle_accept_logic(sid,ride_id):
 async def handle_start_logic(sid,ride_id):
     driver = ActiveDrivers.find(ActiveDrivers.sid == sid).first()
     ride_data = RideUpdate(driverId=driver.user_id,rideStatus=RideStatus.drivingToDestination)
-    await update_ride_by_id(ride_id=ride_id,driver_id=driver.user_id,ride_data=ride_data) 
-    
-    # Emit status update
-    await emit_ride_status_update(ride_id, RideStatus.drivingToDestination, {"message": "Your ride has started. Enjoy!"}, 10) 
+    await update_ride_by_id(ride_id=ride_id,driver_id=driver.user_id,ride_data=ride_data)
+
+    # Emit ride started update
+    from web_socket_handler.server_to_client.ride_updates import emit_ride_started
+    await emit_ride_started(ride_id) 
     
     
     
 async def handle_complete_logic(sid,ride_id):
     driver = ActiveDrivers.find(ActiveDrivers.sid == sid).first()
     ride_data = RideUpdate(driverId=driver.user_id,rideStatus=RideStatus.completed)
-    ride = await update_ride_by_id(ride_id=ride_id,driver_id=driver.user_id,ride_data=ride_data) 
-    
-    # Emit status update
-    await emit_ride_status_update(ride_id, RideStatus.completed, ride.model_dump(), 0)
-    
+    ride = await update_ride_by_id(ride_id=ride_id,driver_id=driver.user_id,ride_data=ride_data)
+
+    # Emit ride completed update
+    from web_socket_handler.server_to_client.ride_updates import emit_ride_completed
+    await emit_ride_completed(ride_id, ride.model_dump())
+
     return ride.model_dump()
+
+async def handle_cancel_ride_logic(sid, ride_id, reason, cancelled_by):
+    """
+    Handle ride cancellation logic for both riders and drivers.
+    """
+    # Determine who is cancelling
+    if is_driver(sid):
+        user_type = "DRIVER"
+        driver = ActiveDrivers.find(ActiveDrivers.sid == sid).first()
+        user_id = driver.user_id
+    elif is_rider(sid):
+        user_type = "RIDER"
+        rider = ActiveRiders.find(ActiveRiders.sid == sid).first()
+        user_id = rider.user_id
+    else:
+        raise ValueError("Unauthorized user attempting to cancel ride")
+
+    # Update ride status
+    ride_update = RideUpdate(rideStatus=RideStatus.canceled)
+    await update_ride_by_id(
+        ride_id=ride_id,
+        ride_data=ride_update,
+        rider_id=user_id if user_type == "RIDER" else None,
+        driver_id=user_id if user_type == "DRIVER" else None
+    )
+
+ 
+    # Emit cancellation update
+    from web_socket_handler.server_to_client.ride_updates import emit_ride_cancelled
+    await emit_ride_cancelled(ride_id, reason, user_type)
     

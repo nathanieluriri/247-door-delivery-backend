@@ -58,6 +58,10 @@ async def lifespan(app:FastAPI):
         [("stripe_id", 1)],
         unique=True
     )
+    
+    await db.chats.create_index(
+        [("rideId", 1)] 
+    )
     await db.reset_tokens.create_index(
         [("expires_at", ASCENDING)],
         expireAfterSeconds=0
@@ -130,37 +134,36 @@ RATE_LIMITS = {
 }
 
 async def get_user_type(request: Request) -> tuple[str, str]:
-    """
-    Return a tuple of (user_identifier, user_type)
-    You can extract from JWT, headers, or session.
-    """
     auth_header = request.headers.get("Authorization")
+
+    # Anonymous fallback
     if not auth_header or not auth_header.startswith("Bearer "):
-        ip_address = request.headers.get("X-Forwarded-For", request.client.host)
-        user_id = ip_address
-        user_type="annonymous"
-        return user_id, user_type if user_type in RATE_LIMITS else "annonymous"
-    
-    
-    token = auth_header.split(" ")[1]
+        ip = request.headers.get("X-Forwarded-For", request.client.host)
+        return ip, "anonymous"
+
+    token = auth_header.split(" ", 1)[1]
+
     try:
-        decoded_token =await decode_jwt_token(token=token,allow_expired=False)
-        access_token  =await get_access_tokens_no_date_check(accessToken=decoded_token.access_token)
-        user_id = access_token.userId
-    
-        user_type = access_token.role
-    except:
-        try:
-            decoded_token =await decode_jwt_token(token=token,allow_expired=False)
-            access_token  =await get_access_tokens_no_date_check(accessToken=decoded_token['access_token'])
-            user_id = access_token.userId
-    
-            user_type = access_token.role
-        except:
-            ip_address = request.headers.get("X-Forwarded-For", request.client.host)
-            user_id = ip_address
-            user_type="annonymous"
-            pass
+        decoded = await decode_jwt_token(token=token)
+
+        # 🔑 normalize admin vs member JWTs
+        access_token_value = (
+            decoded.get("access_token")
+            or decoded.get("accessToken")
+        )
+
+        if not access_token_value:
+            raise ValueError("access token missing in JWT")
+
+        access_token = await get_access_tokens(
+            accessToken=access_token_value
+        )
+
+        return access_token.userId, access_token.role
+
+    except Exception as e:
+        ip = request.headers.get("X-Forwarded-For", request.client.host)
+        return ip, "anonymous" 
 
  
     return user_id, user_type if user_type in RATE_LIMITS else "annonymous"   

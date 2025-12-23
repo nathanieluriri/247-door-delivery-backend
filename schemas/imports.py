@@ -9,7 +9,11 @@ import time
 
 from security.hash import hash_password
 
-
+class PayoutOptions(str, Enum):
+    totalEarnings = "totalEarnings"  # Total money earned
+    withdrawableBalance = "withdrawableBalance"  # Money that can be withdrawn
+    withdrawalHistory = "withdrawalHistory"  # Track withdrawal requests
+    
 class LoginType(str,Enum):
     password="password"
     passwordless="passwordless"

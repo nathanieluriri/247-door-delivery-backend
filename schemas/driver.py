@@ -44,6 +44,13 @@ class DriverRefresh(BaseModel):
 class DriverUpdate(BaseModel):
     # Add other fields here 
     full_name:str
+    
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+   
+class DriverUpdateStripeAccountId(BaseModel):
+    # Add other fields here 
+    stripeAccountId: Optional[str] = None
+    
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
 class DriverUpdatePassword(BaseModel):
@@ -68,7 +75,8 @@ class DriverUpdateAccountStatus(BaseModel):
 class DriverOut(DriverBase):
     # Add other fields here 
     firstName:Optional[str]=''
-    lastName:Optional[str]='' 
+    lastName:Optional[str]=''     
+    stripeAccountId: Optional[str] = None
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     id: Optional[str] = Field(
         default=None,
