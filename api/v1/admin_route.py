@@ -60,7 +60,7 @@ router = APIRouter(prefix="/admins", tags=["Admins"])
 
  
 @router.get(
-    "/{start}/{stop}", 
+    "/", 
     response_model=APIResponse[List[AdminOut]],
     response_model_exclude_none=True,
     response_model_exclude={"data": {"__all__": {"password"}}},
@@ -71,11 +71,11 @@ async def list_admins(
     # Use Path and Query for explicit documentation/validation of GET parameters
     start: Annotated[
         int,
-        Path(ge=0, description="The starting index (offset) for the list of admins.")
+        Query(ge=0, description="The starting index (offset) for the list of admins.")
     ] , 
     stop: Annotated[
         int, 
-        Path(gt=0, description="The ending index for the list of admins (limit).")
+        Query(gt=0, description="The ending index for the list of admins (limit).")
     ]
 ):
     """
@@ -91,12 +91,7 @@ async def list_admins(
     
     """
     
-    # Note: The code below overrides the path parameters with hardcoded defaults (0, 100).
-    # You should typically use the passed parameters: 
-    # items = await retrieve_admins(start=start, stop=stop)
-    
-    # Using the hardcoded values from your original code:
-    items = await retrieve_admins(start=0, stop=100)
+    items = await retrieve_admins(start=start, stop=stop)
     
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
@@ -226,7 +221,7 @@ async def refresh_admin_tokens(
 
 @router.delete("/account",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)], response_model_exclude_none=True)
 async def delete_admin_account(
-    token: accessTokenOut = Depends(verify_token),
+    token: dict = Depends(verify_admin_token),
  
 ):
     """
@@ -235,7 +230,10 @@ async def delete_admin_account(
     The admin ID is extracted from the valid Access Token in the Authorization header.
     No request body is required.
     """
-    result = await remove_admin(admin_id=token.userId)
+    admin_id = token.get("userId") or token.get("user_id")
+    if not admin_id:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    result = await remove_admin(admin_id=admin_id)
     
     # The 'result' is assumed to be a standard FastAPI response object or a dict/model 
     # that is automatically converted to a response.
@@ -243,8 +241,11 @@ async def delete_admin_account(
 
 
 @router.patch("/profile",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does),Depends(check_admin_account_status_and_permissions)])
-async def update_driver_profile(admin_details:AdminUpdate,token:accessTokenOut = Depends(verify_admin_token)):
-    admin = await update_admin_by_id(admin_id=token.userId,admin_data=admin_details,)
+async def update_driver_profile(admin_details:AdminUpdate,token:dict = Depends(verify_admin_token)):
+    admin_id = token.get("userId") or token.get("user_id")
+    if not admin_id:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    admin = await update_admin_by_id(admin_id=admin_id,admin_data=admin_details,)
     return APIResponse(data=admin,status_code=200,detail="Succesfully updated profile")
 
 # ---------------------------------------------------

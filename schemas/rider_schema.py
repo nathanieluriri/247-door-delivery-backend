@@ -36,8 +36,8 @@ class RiderCreate(RiderBase):
     
 class RiderUpdate(BaseModel):
     # Add other fields here 
-    firstName:str
-    lastName:str 
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
 class RiderUpdatePassword(BaseModel):
@@ -48,7 +48,7 @@ class RiderUpdatePassword(BaseModel):
     def obscure_password(self):
         if self.password:
             self.password=hash_password(self.password)
-            return self
+        return self
         
 class RiderUpdateAccountStatus(BaseModel):
     accountStatus:AccountStatus

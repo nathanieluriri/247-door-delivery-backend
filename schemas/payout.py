@@ -15,7 +15,7 @@ import time
 class PayoutBase(BaseModel):
     payoutOption: PayoutOptions  # Type of payout (earnings, withdrawable, or withdrawal)
     amount: float  # Amount for the payout
-    rideIds: Optional[List[str]] = []  # List of ride IDs (only for earnings payouts)
+    rideIds: Optional[List[str]] = Field(default_factory=list)  # List of ride IDs (only for earnings payouts)
     driverId: str  # User ID (driver or rider)
     
     # Method to calculate total earnings (if needed for reporting)
@@ -25,7 +25,9 @@ class PayoutBase(BaseModel):
     # Method to track ride completion and earnings
     def add_ride(self, ride_id: str):
         if self.payoutOption == PayoutOptions.totalEarnings:
-            self.ride_ids.append(ride_id)
+            if self.rideIds is None:
+                self.rideIds = []
+            self.rideIds.append(ride_id)
 
 # Payout creation model (when a payout record is created after a ride or withdrawal)
 class PayoutCreate(PayoutBase):
@@ -46,9 +48,9 @@ class PayoutCreate(PayoutBase):
 
 # Payout update model (when we update existing payouts)
 class PayoutUpdate(BaseModel):
-    payoutOption: Optional[PayoutOptions]  # Update the payout option type if needed
-    amount: Optional[float]  # Update the amount (e.g., after a withdrawal)
-    rideIds: Optional[List[str]]  # Optionally update the ride IDs (only for totalEarnings)
+    payoutOption: Optional[PayoutOptions] = None  # Update the payout option type if needed
+    amount: Optional[float] = None  # Update the amount (e.g., after a withdrawal)
+    rideIds: Optional[List[str]] = None  # Optionally update the ride IDs (only for totalEarnings)
     last_updated: int = Field(default_factory=lambda: int(time.time()))  # Update the timestamp
 
 class PayoutBalanceOut(BaseModel):

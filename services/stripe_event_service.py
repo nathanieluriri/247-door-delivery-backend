@@ -49,7 +49,7 @@ async def remove_stripe_event(stripe_event_id: str):
 
     else: return True
     
-async def retrieve_stripe_event_by_stripe_event_id(id: str) -> StripeEventOut:
+async def retrieve_stripe_event_by_id(id: str) -> StripeEventOut:
     """Retrieves stripe_event object based specific Id 
 
     Raises:
@@ -88,13 +88,13 @@ async def retrieve_stripe_event_by_stripe_event_id(stripe_id: str) -> StripeEven
     return result
 
 
-async def retrieve_stripe_events(start=0,stop=100) -> List[StripeEventOut]:
+async def retrieve_stripe_events(filters: dict = None, start=0, stop=100) -> List[StripeEventOut]:
     """Retrieves StripeEventOut Objects in a list
 
     Returns:
         _type_: StripeEventOut
     """
-    return await get_stripe_events(start=start,stop=stop)
+    return await get_stripe_events(filter_dict=filters or {}, start=start, stop=stop)
 
 
 async def update_stripe_event_by_id(stripe_event_id: str, stripe_event_data: StripeEventUpdate) -> StripeEventOut:

@@ -43,6 +43,11 @@ class ResetTokenOut(ResetTokenBase):
         validation_alias=AliasChoices("last_updated", "lastUpdated"),
         serialization_alias="lastUpdated",
     )
+    expires_at: Optional[datetime] = Field(
+        default=None,
+        validation_alias=AliasChoices("expires_at", "expiresAt"),
+        serialization_alias="expiresAt",
+    )
     
     @model_validator(mode="before")
     @classmethod

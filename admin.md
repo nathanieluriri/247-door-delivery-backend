@@ -325,4 +325,3 @@ Common admin-specific errors:
 - Cache frequently accessed data
 - Monitor API usage patterns
 - Implement rate limiting for bulk operations</content>
-<parameter name="filePath">c:\Users\Mr Dashi\Downloads\door-delivery-backend\app\admin.md

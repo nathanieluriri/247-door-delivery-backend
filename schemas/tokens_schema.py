@@ -72,6 +72,8 @@ class TokenOut(BaseModel):
     dateCreated:Optional[str]=datetime.now(timezone.utc).isoformat()
     @model_validator(mode='before')
     def set_dates(cls,values):
+        if values is None:
+            values = {}
         now_str = datetime.now(timezone.utc).isoformat()
         values['dateCreated']= now_str
         return values    

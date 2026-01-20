@@ -22,6 +22,11 @@ async def create_payment(payment_data: PaymentCreate) -> PaymentOut:
     return returnable_result
 
 async def get_payment(filter_dict: dict) -> Optional[PaymentOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment filter is required."
+        )
     try:
         result = await db.payments.find_one(filter_dict)
 
@@ -36,14 +41,17 @@ async def get_payment(filter_dict: dict) -> Optional[PaymentOut]:
             detail=f"An error occurred while fetching payment: {str(e)}"
         )
     
-async def get_payments(filter_dict: dict = {},start=0,stop=100) -> List[PaymentOut]:
+async def get_payments(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[PaymentOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.payments.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         payment_list = []
 
@@ -58,13 +66,40 @@ async def get_payments(filter_dict: dict = {},start=0,stop=100) -> List[PaymentO
             detail=f"An error occurred while fetching payments: {str(e)}"
         )
 async def update_payment(filter_dict: dict, payment_data: PaymentUpdate) -> PaymentOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment filter is required."
+        )
+    update_doc = payment_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No payment fields to update."
+        )
     result = await db.payments.find_one_and_update(
         filter_dict,
-        {"$set": payment_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found."
+        )
     returnable_result = PaymentOut(**result)
     return returnable_result
 
 async def delete_payment(filter_dict: dict):
-    return await db.payments.delete_one(filter_dict)
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment filter is required."
+        )
+    result = await db.payments.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found."
+        )
+    return result

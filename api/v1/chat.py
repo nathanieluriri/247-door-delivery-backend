@@ -1,7 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query, Path, status, Request, Depends
+from fastapi import APIRouter, HTTPException, Path, status, Request, Depends
 from fastapi.responses import StreamingResponse
-from typing import List, Optional
-import json
+from typing import List
 
 # Assuming these schemas exist based on your template
 from schemas.response_schema import APIResponse
@@ -19,11 +18,19 @@ from services.chat_service import (
     retrieve_chat_by_chat_id,
     update_chat_by_id,
 )
+from services.ride_service import retrieve_ride_by_ride_id
 # Assuming you have your redis instance and auth dependencies
-from core.redis_cache import async_redis
 from security.auth import verify_token
+from services.sse_service import stream_events
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
+
+async def ensure_ride_membership(user: JWTPayload, ride_id: str) -> None:
+    ride = await retrieve_ride_by_ride_id(id=ride_id)
+    if user.user_type == "RIDER" and ride.userId != user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride access denied")
+    if user.user_type == "DRIVER" and ride.driverId != user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride access denied")
 
 # ------------------------------
 # 1. Send Chat (Create & Broadcast)
@@ -42,6 +49,7 @@ async def send_chat_message(
     
     
     new_data = ChatCreate(**payload.model_dump(),userType=user.user_type,userId=user.user_id)
+    await ensure_ride_membership(user, payload.rideId)
     
     # 1. Save to Database
     if user.user_type=="DRIVER":
@@ -50,14 +58,6 @@ async def send_chat_message(
         new_item = await add_chat(new_data,riderId=user.user_id)
     if not new_item:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to send message")
-    
-    # 2. Publish to Redis (The SSE route listens to this)
-    # Channel format: "ride:{ride_id}:chat"
-    # We serialize the output model to JSON for the stream
-    channel = f"ride:{new_item.ride_id}:chat"
-    message_data = new_item.model_dump_json()
-    
-    await async_redis.publish(channel, message_data)
     
     return APIResponse(status_code=201, data=new_item, detail="Message sent and broadcasted")
 
@@ -69,32 +69,22 @@ async def send_chat_message(
 async def stream_chat_updates(
     ride_id: str,
     request: Request,
-    user=Depends(verify_token)
+    user: JWTPayload = Depends(verify_token)
 ):
     """
     SSE Endpoint for Riders and Drivers to receive real-time chat messages.
     - Connects to Redis channel: 'ride:{ride_id}:chat'
     - Yields new messages as they are published by the POST route.
     """
-    pubsub = async_redis.pubsub()
-    channel = f"ride:{ride_id}:chat"
-    await pubsub.subscribe(channel)
-
-    async def event_generator():
-        try:
-            async for message in pubsub.listen():
-                if await request.is_disconnected():
-                    break
-
-                if message["type"] == "message":
-                    # message['data'] is the JSON string we published in send_chat_message
-                    yield f"data: {message['data']}\n\n"
-        finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.close()
-
+    await ensure_ride_membership(user, ride_id)
     return StreamingResponse(
-        event_generator(),
+        stream_events(
+            request=request,
+            user_type=user.user_type.lower(),
+            user_id=user.user_id,
+            event_types=["chat_message"],
+            ride_id=ride_id,
+        ),
         media_type="text/event-stream"
     )
 
@@ -105,7 +95,7 @@ async def stream_chat_updates(
 # ---------------------------------
 @router.get("/{rideId}", response_model=APIResponse[List[ChatOut]])
 async def get_message_by_id(rideId: str = Path(..., description="ride ID")):
-    item = await retrieve_chat_by_chat_id(id=id)
+    item = await retrieve_chat_by_chat_id(id=rideId)
     if not item:
         raise HTTPException(status_code=404, detail="Message not found")
     return APIResponse(status_code=200, data=item, detail="Message fetched")

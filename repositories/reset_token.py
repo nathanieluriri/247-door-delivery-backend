@@ -45,6 +45,11 @@ async def create_reset_token(
     return ResetTokenOut(**result)
 
 async def get_reset_token(filter_dict: dict) -> Optional[ResetTokenOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token filter is required."
+        )
     try:
         result = await db.reset_tokens.find_one(filter_dict)
 
@@ -59,14 +64,17 @@ async def get_reset_token(filter_dict: dict) -> Optional[ResetTokenOut]:
             detail=f"An error occurred while fetching reset_token: {str(e)}"
         )
     
-async def get_reset_tokens(filter_dict: dict = {},start=0,stop=100) -> List[ResetTokenOut]:
+async def get_reset_tokens(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[ResetTokenOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.reset_tokens.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         reset_token_list = []
 
@@ -81,10 +89,26 @@ async def get_reset_tokens(filter_dict: dict = {},start=0,stop=100) -> List[Rese
             detail=f"An error occurred while fetching reset_tokens: {str(e)}"
         )
 async def update_reset_token(filter_dict: dict, reset_token_data: ResetTokenUpdate) -> ResetTokenOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token filter is required."
+        )
+    update_doc = reset_token_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No reset token fields to update."
+        )
     result = await db.reset_tokens.find_one_and_update(
         filter_dict,
-        {"$set": reset_token_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reset token not found."
+        )
     returnable_result = ResetTokenOut(**result)
     return returnable_result

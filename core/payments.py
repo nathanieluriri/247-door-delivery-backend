@@ -41,6 +41,8 @@ class StripePaymentProvider(PaymentProvider):
     async def create_payment_link(self, ride: RideOut) -> str:
         if ride.paymentStatus:
             raise HTTPException(status_code=409, detail="Fare has already been paid.")
+        if ride.price is None:
+            raise HTTPException(status_code=400, detail="Ride price is missing.")
 
         stops_summary = " → ".join(ride.stops) if ride.stops else "No stops"
         trip_description = (
@@ -53,12 +55,13 @@ class StripePaymentProvider(PaymentProvider):
             f"User ID: {ride.userId}"
         )
 
-        unit_amount = int(ride.price / 10)
+        unit_amount = int(round(ride.price / 10))
 
         product_name = (
             f"Pickup: {ride.map.legs[0].startAddress}, Distance: {ride.map.totalDistanceMeters/1000:.1f} km"
         )
 
+        idempotency_key = f"ride:{ride.id}:payment_link"
         payment_link = await run_in_threadpool(
             stripe.PaymentLink.create,
             line_items=[
@@ -75,6 +78,7 @@ class StripePaymentProvider(PaymentProvider):
             ],
             after_completion={"type": "redirect", "redirect": {"url": self.success_redirect_url}},
             metadata={"ride_id": ride.id, "user_id": ride.userId},
+            idempotency_key=idempotency_key,
         )
 
         return payment_link.url
@@ -89,7 +93,7 @@ class StripePaymentProvider(PaymentProvider):
         if not rider or not getattr(rider, "email", None):
             raise HTTPException(status_code=404, detail="Rider email not found.")
 
-        amount = int(ride.price / 10)
+        amount = int(round(ride.price / 10))
         description = (
             f"Pickup: {ride.origin.address}\n"
             f"Distance: {ride.map.totalDistanceMeters / 1000:.1f} km\n"
@@ -119,6 +123,7 @@ class StripePaymentProvider(PaymentProvider):
             collection_method="send_invoice",
             days_until_due=0,
             metadata={"ride_id": ride.id, "rider_id": rider.id},
+            idempotency_key=f"ride:{ride.id}:invoice",
         )
 
         await run_in_threadpool(
@@ -130,6 +135,7 @@ class StripePaymentProvider(PaymentProvider):
             currency="gbp",
             description=description,
             metadata={"ride_id": ride.id, "rider_id": rider.id},
+            idempotency_key=f"ride:{ride.id}:invoice_item",
         )
 
         finalized_invoice = await run_in_threadpool(stripe.Invoice.finalize_invoice, invoice.id)
@@ -147,7 +153,12 @@ class StripePaymentProvider(PaymentProvider):
             if amount:
                 refund_data["amount"] = amount
 
-            refund = await run_in_threadpool(stripe.Refund.create, **refund_data)
+            idempotency_key = f"refund:{payment_intent_id}:{amount or 'full'}"
+            refund = await run_in_threadpool(
+                stripe.Refund.create,
+                **refund_data,
+                idempotency_key=idempotency_key,
+            )
 
             return {"refund_id": refund.id, "status": refund.status}
         except Exception as e:
@@ -166,6 +177,8 @@ class StripePaymentProvider(PaymentProvider):
         # 1) Verify Stripe signature
         payload = await request.body()
         sig_header = request.headers.get("stripe-signature")
+        if not WEBHOOK_SECRET:
+            return JSONResponse(status_code=500, content={"detail": "Stripe webhook secret not configured"})
         if not sig_header:
             print({"detail":"Missing Stripe signature"})
             return JSONResponse(status_code=400, content={"detail": "Missing Stripe signature"})
@@ -240,10 +253,34 @@ class StripePaymentProvider(PaymentProvider):
             paid_ride = RideUpdate(checkoutSessionObject=session,stripeEvent=stripe_event,rideStatus=RideStatus.findingDriver,payment_intent_id=payment_intent_id,paymentStatus=True)
             celery_app.send_task("celery_worker.run_async_task",args=["update_ride",{"ride_id":ride_id,"payload": paid_ride.model_dump()}])
             
-            # Emit WebSocket status update
-            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
-             
-            await emit_ride_status_update(ride_id, paid_ride.rideStatus, {"message": "Payment confirmed, finding driver..."},14)
+            # Emit SSE status update
+            from bson import ObjectId
+            from repositories.ride import get_ride
+            from services.sse_service import publish_ride_status_update
+
+            rider_id = None
+            driver_id = None
+            try:
+                ride_filter = {"_id": ObjectId(ride_id)} if ObjectId.is_valid(ride_id) else {"_id": ride_id}
+                ride = await get_ride(ride_filter)
+                if ride:
+                    rider_id = ride.userId
+                    driver_id = ride.driverId
+            except Exception:
+                rider_id = None
+                driver_id = None
+
+            try:
+                await publish_ride_status_update(
+                    ride_id=ride_id,
+                    status=paid_ride.rideStatus,
+                    rider_id=rider_id,
+                    driver_id=driver_id,
+                    message="Payment confirmed, finding driver...",
+                    eta_minutes=14,
+                )
+            except Exception:
+                pass
              
    
 

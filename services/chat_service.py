@@ -20,6 +20,8 @@ from repositories.chat import (
 from schemas.chat import ChatCreate, ChatUpdate, ChatOut
 from schemas.imports import RideStatus
 from services.ride_service import retrieve_ride_by_ride_id
+from services.sse_service import publish_chat_message
+import time
 
 
 async def add_chat(chat_data: ChatCreate,driverId:str=None,riderId:str=None) -> ChatOut:
@@ -30,19 +32,44 @@ async def add_chat(chat_data: ChatCreate,driverId:str=None,riderId:str=None) -> 
     """
     
    
-    ride= await retrieve_ride_by_ride_id(id= chat_data.rideId)
-    if driverId!=None and riderId==None:
-        if (ride.rideStatus==RideStatus.arrivingToPickup or ride.rideStatus==RideStatus.drivingToDestination) and ride.driverId==driverId:
-            return await create_chat(chat_data)
-        
-    elif driverId==None and riderId!=None:
-        if(ride.rideStatus==RideStatus.arrivingToPickup or ride.rideStatus==RideStatus.drivingToDestination)  and ride.driverId==driverId:
-            return await create_chat(chat_data) 
-        
-    elif driverId==None and riderId==None:
-        raise HTTPException(status_code=400,detail="Driver Id or Rider Id required for creating a chat")
-    
-    else: raise HTTPException(status_code=400,detail="error in add_chat function")
+    ride = await retrieve_ride_by_ride_id(id=chat_data.rideId)
+    allowed_status = ride.rideStatus in (
+        RideStatus.arrivingToPickup,
+        RideStatus.drivingToDestination,
+    )
+    if driverId is not None and riderId is None:
+        if allowed_status and ride.driverId == driverId:
+            chat = await create_chat(chat_data)
+            await publish_chat_message(
+                chat_id=chat.id,
+                ride_id=chat.rideId,
+                sender_id=chat_data.userId,
+                sender_type=chat_data.userType,
+                message=chat.text,
+                timestamp=int(time.time()),
+                rider_id=ride.userId,
+                driver_id=ride.driverId,
+            )
+            return chat
+        raise HTTPException(status_code=403, detail="Driver not allowed to chat for this ride")
+
+    if driverId is None and riderId is not None:
+        if allowed_status and ride.userId == riderId:
+            chat = await create_chat(chat_data)
+            await publish_chat_message(
+                chat_id=chat.id,
+                ride_id=chat.rideId,
+                sender_id=chat_data.userId,
+                sender_type=chat_data.userType,
+                message=chat.text,
+                timestamp=int(time.time()),
+                rider_id=ride.userId,
+                driver_id=ride.driverId,
+            )
+            return chat
+        raise HTTPException(status_code=403, detail="Rider not allowed to chat for this ride")
+
+    raise HTTPException(status_code=400,detail="Driver Id or Rider Id required for creating a chat")
 
 
 async def remove_chat(chat_id: str):

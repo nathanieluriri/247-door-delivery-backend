@@ -9,7 +9,7 @@ load_dotenv()
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 mongo_client = MongoClient(MONGO_URL)
 jobstore = MongoDBJobStore(database="apscheduler", collection="background_jobs", client=mongo_client)
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone="UTC")
 scheduler.add_jobstore(jobstore)
 
 # EXAMPLE CODE FOR ADDING JOB

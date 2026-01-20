@@ -12,7 +12,15 @@ from repositories.rider_repo import (
 )
 from schemas.imports import ALLOWED_ACCOUNT_STATUS_TRANSITIONS, AccountStatus, LoginType, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, UserType
 from schemas.reset_token import ResetTokenBase, ResetTokenCreate
-from schemas.rider_schema import RiderCreate, RiderUpdate, RiderOut,RiderBase,RiderRefresh
+from schemas.rider_schema import (
+    RiderCreate,
+    RiderUpdate,
+    RiderUpdatePassword,
+    RiderUpdateAccountStatus,
+    RiderOut,
+    RiderBase,
+    RiderRefresh,
+)
 from security.hash import check_password
 from security.encrypting_jwt import create_jwt_member_token, create_jwt_token
 from repositories.tokens_repo import add_refresh_tokens, add_access_tokens, accessTokenCreate,accessTokenOut,refreshTokenCreate
@@ -101,6 +109,10 @@ async def authenticate_rider(user_data:RiderBase )->RiderOut:
 async def refresh_rider_tokens_reduce_number_of_logins(user_refresh_data:RiderRefresh,expired_access_token):
     refreshObj= await get_refresh_tokens(user_refresh_data.refresh_token)
     if refreshObj:
+        if not ObjectId.is_valid(refreshObj.userId):
+            await delete_refresh_token(refreshToken=user_refresh_data.refresh_token)
+            await delete_access_token(accessToken=expired_access_token)
+            raise HTTPException(status_code=401,detail="Invalid refresh token")
         if refreshObj.previousAccessToken==expired_access_token:
             user = await get_rider(filter_dict={"_id":ObjectId(refreshObj.userId)})
             
@@ -136,6 +148,7 @@ async def remove_rider(user_id: str):
 
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Rider not found")
+    return True
 
 
 async def retrieve_rider_by_rider_id(id: str) -> RiderOut:
@@ -194,7 +207,7 @@ async def update_rider_by_id(user_id: str, user_data: RiderUpdate,is_password_ge
 
 async def update_rider_by_id_admin_func(
     user_id: str,
-    user_data: RiderUpdate,
+    user_data: RiderUpdateAccountStatus,
 ) -> RiderOut:
     """
     Update rider entry with state validation and no-op prevention.
@@ -205,6 +218,9 @@ async def update_rider_by_id_admin_func(
         raise HTTPException(status_code=400, detail="Invalid rider ID format")
 
     filter_dict = {"_id": ObjectId(user_id)}
+
+    if user_data.accountStatus is None:
+        raise HTTPException(status_code=400, detail="Account status is required")
 
     # 2️⃣ Fetch existing rider
     existing_rider = await get_rider(filter_dict)
@@ -317,7 +333,7 @@ async def rider_reset_password_conclusion(
         )
 
     # 5️⃣ Update password
-    rider_update = RiderUpdate(
+    rider_update = RiderUpdatePassword(
         password=rider_details.password
     )
 
@@ -340,10 +356,10 @@ async def rider_reset_password_conclusion(
 # -----------------------------------
 
 async def ban_riders(user_id: str, user:dict) -> dict:
-    user_data= RiderUpdate(**user)
+    user_data= RiderUpdateAccountStatus(**user)
     update =await update_rider_by_id_admin_func(user_id=user_id,user_data=user_data)
     rider = await retrieve_rider_by_rider_id(id=user_id)
-    send_ban_warning(rider.firstName,rider.lastName)
+    send_ban_warning(rider.email,rider.firstName,rider.lastName)
     
     
     

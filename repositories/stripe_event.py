@@ -21,7 +21,10 @@ async def create_stripe_event(stripe_event_data: StripeEventCreate) -> StripeEve
     try:
         result = await db.stripe_events.insert_one(stripe_event_dict)
     except DuplicateKeyError:
-        raise ValueError("Stripe event with this stripe_id already exists")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stripe event with this stripe_id already exists."
+        )
 
     result = await db.stripe_events.find_one(
         {"_id": result.inserted_id}
@@ -30,6 +33,11 @@ async def create_stripe_event(stripe_event_data: StripeEventCreate) -> StripeEve
     return StripeEventOut(**result)
 
 async def get_stripe_event(filter_dict: dict) -> Optional[StripeEventOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe event filter is required."
+        )
     try:
         result = await db.stripe_events.find_one(filter_dict)
 
@@ -44,14 +52,17 @@ async def get_stripe_event(filter_dict: dict) -> Optional[StripeEventOut]:
             detail=f"An error occurred while fetching stripe_event: {str(e)}"
         )
     
-async def get_stripe_events(filter_dict: dict = {},start=0,stop=100) -> List[StripeEventOut]:
+async def get_stripe_events(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[StripeEventOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.stripe_events.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         stripe_event_list = []
 
@@ -66,13 +77,40 @@ async def get_stripe_events(filter_dict: dict = {},start=0,stop=100) -> List[Str
             detail=f"An error occurred while fetching stripe_events: {str(e)}"
         )
 async def update_stripe_event(filter_dict: dict, stripe_event_data: StripeEventUpdate) -> StripeEventOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe event filter is required."
+        )
+    update_doc = stripe_event_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No stripe event fields to update."
+        )
     result = await db.stripe_events.find_one_and_update(
         filter_dict,
-        {"$set": stripe_event_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stripe event not found."
+        )
     returnable_result = StripeEventOut(**result)
     return returnable_result
 
 async def delete_stripe_event(filter_dict: dict):
-    return await db.stripe_events.delete_one(filter_dict)
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe event filter is required."
+        )
+    result = await db.stripe_events.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stripe event not found."
+        )
+    return result

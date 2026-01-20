@@ -1,6 +1,8 @@
 from string import Template
+from . import render_localized_template
 
-changing_password_template_string=Template("""
+changing_password_html_templates = {
+  "en": Template("""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -112,11 +114,44 @@ changing_password_template_string=Template("""
 
                 <div style="font-family: Roboto-Regular, Helvetica, Arial, sans-serif; font-size: 14px; color: rgba(0,0,0,0.87); line-height: 20px; padding-top: 20px; text-align: center;">
                   We got a request from you to change your password so please use the otp and change your password. If this was you, you don’t need to do anything. If not, we’ll help you secure your account.
-                  </html>
+</html>
 
 
 """)
+}
 
-def generate_changing_password_email_from_template(otp_code,user_email,avatar_image_link):
-    generated_email = changing_password_template_string.safe_substitute(otp_code=otp_code,email=user_email,avatar=avatar_image_link )
-    return generated_email
+changing_password_text_templates = {
+  "en": Template("""Here is the code to reset your password: $otp_code
+
+We sent this code to $email, the address associated with the account requesting the reset.
+
+If you did not request this, you can safely ignore this message.
+""")
+}
+
+def generate_changing_password_email_from_template(
+    otp_code,
+    user_email,
+    avatar_image_link,
+    locale="en",
+    return_format="html",
+):
+    values = {
+        "otp_code": otp_code,
+        "email": user_email,
+        "avatar": avatar_image_link,
+    }
+    html_body = render_localized_template(
+        changing_password_html_templates, locale, values, html=True
+    )
+    text_body = render_localized_template(
+        changing_password_text_templates, locale, values, html=False
+    )
+
+    if return_format == "html":
+        return html_body
+    if return_format == "text":
+        return text_body
+    if return_format == "both":
+        return {"html": html_body, "text": text_body}
+    raise ValueError("return_format must be 'html', 'text', or 'both'.")

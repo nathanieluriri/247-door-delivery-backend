@@ -9,12 +9,26 @@ from services.rider_service import retrieve_rider_by_rider_id
 from services.driver_service import retrieve_driver_by_driver_id
 
 
+def _extract_user_id(token) -> str | None:
+    if token is None:
+        return None
+    if isinstance(token, dict):
+        return token.get("userId") or token.get("user_id")
+    return getattr(token, "userId", None) or getattr(token, "user_id", None)
+
+
 async def check_admin_account_status_and_permissions(
     request: Request,
-    token: accessTokenOut = Depends(verify_admin_token),
+    token: dict = Depends(verify_admin_token),
 ):
     # 1️⃣ Load admin
-    admin = await retrieve_admin_by_admin_id(id=token.get("userId"))
+    admin_id = _extract_user_id(token)
+    if not admin_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin token",
+        )
+    admin = await retrieve_admin_by_admin_id(id=admin_id)
 
     if not admin:
         raise HTTPException(
@@ -69,16 +83,8 @@ async def check_rider_account_status(
     request: Request, 
     token: accessTokenOut = Depends(verify_token_rider_role)
 ):
-    print("___________check_rider_account_status___________")
-    
     # Fetch the rider
     rider = await retrieve_rider_by_rider_id(id=token.userId)
-    print("rider:", rider)
-    
-    # Route info
-    # print("Route Path:", request.url.path)
-    # endpoint = request.scope.get("endpoint")
-    # print("Function:", endpoint.__name__ if endpoint else "Unknown")
     
     # Validate rider exists
     if not rider:
@@ -94,7 +100,6 @@ async def check_rider_account_status(
             detail="Rider account is not active",
         )
     
-    print("___________check_rider_account_status___________")
     return rider
 
 
@@ -103,16 +108,8 @@ async def check_driver_account_status(
     request: Request, 
     token: accessTokenOut = Depends(verify_token_driver_role)
 ):
-    print("___________check_driver_account_status___________")
-    
     # Fetch the driver
     driver = await retrieve_driver_by_driver_id(id=token.userId)
-    print("driver:", driver)
-    
-    # # Route info
-    # print("Route Path:", request.url.path)
-    # endpoint = request.scope.get("endpoint")
-    # print("Function:", endpoint.__name__ if endpoint else "Unknown")
     
     # Validate driver exists
     if not driver:
@@ -128,6 +125,5 @@ async def check_driver_account_status(
             detail="Driver account is not active",
         )
     
-    print("___________check_driver_account_status___________")
     return driver
     

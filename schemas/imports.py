@@ -94,7 +94,7 @@ class CheckoutSessionObject(BaseModel):
     currency: Optional[str]
     payment_intent: Optional[str]
     payment_link: Optional[str]
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = Field(default_factory=dict)
     
 class InvoiceData(BaseModel):
     id:str
@@ -102,7 +102,7 @@ class InvoiceData(BaseModel):
     amount_paid: Optional[int]
     currency: Optional[str]
     customer: Optional[str]
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = Field(default_factory=dict)
     email_sent_to: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("email_sent_to", "emailSentTo"),

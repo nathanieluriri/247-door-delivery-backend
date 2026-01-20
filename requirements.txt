@@ -24,8 +24,6 @@ limits
 bcrypt
 APScheduler==3.11.0
 authlib
-python-socketio
-python-socketio[asyncio]
 redis_om
 googlemaps
 pycountry

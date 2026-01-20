@@ -33,19 +33,18 @@ async def add_rating(rating_data: RatingCreate,driverId:str=None,riderId:str=Non
     """
    
    
-    ride= await retrieve_ride_by_ride_id(id= rating_data.rideId)
-    if driverId!=None and riderId==None:
-        if ride.rideStatus==RideStatus.completed and ride.driverId==driverId:
+    ride = await retrieve_ride_by_ride_id(id=rating_data.rideId)
+    if driverId is not None and riderId is None:
+        if ride.rideStatus == RideStatus.completed and ride.driverId == driverId:
             return await create_rating(rating_data)
-        
-    elif driverId==None and riderId!=None:
-        if ride.rideStatus==RideStatus.completed and ride.driverId==driverId:
-            return await create_rating(rating_data) 
-        
-    elif driverId==None and riderId==None:
-        raise HTTPException(status_code=400,detail="Driver Id or Rider Id required for rating ride")
-    
-    else: raise HTTPException(status_code=400,detail="error in add_rating function")
+        raise HTTPException(status_code=403, detail="Driver not allowed to rate this ride")
+
+    if driverId is None and riderId is not None:
+        if ride.rideStatus == RideStatus.completed and ride.userId == riderId:
+            return await create_rating(rating_data)
+        raise HTTPException(status_code=403, detail="Rider not allowed to rate this ride")
+
+    raise HTTPException(status_code=400,detail="Driver Id or Rider Id required for rating ride")
 
 async def remove_rating(rating_id: str):
     """deletes a field from the database and removes RatingCreateobject 

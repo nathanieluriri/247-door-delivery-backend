@@ -22,6 +22,11 @@ async def create_payout(payout_data: PayoutCreate) -> PayoutOut:
     return returnable_result
 
 async def get_payout(filter_dict: dict) -> Optional[PayoutOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payout filter is required."
+        )
     try:
         result = await db.payouts.find_one(filter_dict)
 
@@ -36,14 +41,17 @@ async def get_payout(filter_dict: dict) -> Optional[PayoutOut]:
             detail=f"An error occurred while fetching payout: {str(e)}"
         )
     
-async def get_payouts(filter_dict: dict = {},start=0,stop=100) -> List[PayoutOut]:
+async def get_payouts(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[PayoutOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.payouts.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         payout_list = []
 
@@ -58,13 +66,40 @@ async def get_payouts(filter_dict: dict = {},start=0,stop=100) -> List[PayoutOut
             detail=f"An error occurred while fetching payouts: {str(e)}"
         )
 async def update_payout(filter_dict: dict, payout_data: PayoutUpdate) -> PayoutOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payout filter is required."
+        )
+    update_doc = payout_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No payout fields to update."
+        )
     result = await db.payouts.find_one_and_update(
         filter_dict,
-        {"$set": payout_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payout not found."
+        )
     returnable_result = PayoutOut(**result)
     return returnable_result
 
 async def delete_payout(filter_dict: dict):
-    return await db.payouts.delete_one(filter_dict)
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payout filter is required."
+        )
+    result = await db.payouts.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payout not found."
+        )
+    return result

@@ -22,6 +22,11 @@ async def create_chat(chat_data: ChatCreate) -> ChatOut:
     return returnable_result
 
 async def get_chat(filter_dict: dict) -> Optional[ChatOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat filter is required."
+        )
     try:
         result = await db.chats.find_one(filter_dict)
 
@@ -36,14 +41,17 @@ async def get_chat(filter_dict: dict) -> Optional[ChatOut]:
             detail=f"An error occurred while fetching chat: {str(e)}"
         )
     
-async def get_chats(filter_dict: dict = {},start=0,stop=100) -> List[ChatOut]:
+async def get_chats(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[ChatOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.chats.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         chat_list = []
 
@@ -58,13 +66,40 @@ async def get_chats(filter_dict: dict = {},start=0,stop=100) -> List[ChatOut]:
             detail=f"An error occurred while fetching chats: {str(e)}"
         )
 async def update_chat(filter_dict: dict, chat_data: ChatUpdate) -> ChatOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat filter is required."
+        )
+    update_doc = chat_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No chat fields to update."
+        )
     result = await db.chats.find_one_and_update(
         filter_dict,
-        {"$set": chat_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found."
+        )
     returnable_result = ChatOut(**result)
     return returnable_result
 
 async def delete_chat(filter_dict: dict):
-    return await db.chats.delete_one(filter_dict)
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat filter is required."
+        )
+    result = await db.chats.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found."
+        )
+    return result

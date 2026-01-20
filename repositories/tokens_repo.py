@@ -1,7 +1,7 @@
 from core.database import db
 
 from schemas.tokens_schema import accessTokenCreate,refreshTokenCreate,accessTokenOut,refreshTokenOut
-import asyncio
+from pymongo import ReturnDocument
 from datetime import datetime, timezone, timedelta
 from dateutil import parser
 from bson import ObjectId,errors
@@ -36,9 +36,18 @@ async def add_admin_access_tokens(token_data:accessTokenCreate)->accessTokenOut:
     return accessToken 
 
 async def update_admin_access_tokens(token:str)->accessTokenOut:
-    updatedToken= await db.accessToken.find_one_and_update(filter={"_id":ObjectId(token)},update={"$set": {'status':'active'}},return_document=True)
-    accessToken = accessTokenOut(**updatedToken)
-    return accessToken
+    try:
+        token_id = ObjectId(token)
+    except errors.InvalidId:
+        raise HTTPException(status_code=400,detail="Invalid access token id")
+    updatedToken= await db.accessToken.find_one_and_update(
+        filter={"_id":token_id},
+        update={"$set": {'status':'active'}},
+        return_document=ReturnDocument.AFTER
+    )
+    if not updatedToken:
+        raise HTTPException(status_code=404,detail="Access token not found")
+    return accessTokenOut(**updatedToken)
     
 async def add_refresh_tokens(token_data:refreshTokenCreate)->refreshTokenOut:
     token = token_data.model_dump()
@@ -47,19 +56,28 @@ async def add_refresh_tokens(token_data:refreshTokenCreate)->refreshTokenOut:
     refreshToken = refreshTokenOut(**tokn)
     return refreshToken
 
-async def delete_access_token(accessToken):
+async def delete_access_token(accessToken:str)->bool:
     # await db.refreshToken.delete_many({"previousAccessToken":accessToken})
-    await db.accessToken.find_one_and_delete({'_id':ObjectId(accessToken)})
+    try:
+        obj_id = ObjectId(accessToken)
+    except errors.InvalidId:
+        return False
+    result = await db.accessToken.find_one_and_delete({'_id':obj_id})
+    return result is not None
+
+
+async def delete_refresh_tokens_by_previous_access_token(accessToken: str) -> int:
+    result = await db.refreshToken.delete_many({"previousAccessToken": accessToken})
+    return result.deleted_count
     
     
-async def delete_refresh_token(refreshToken:str):
+async def delete_refresh_token(refreshToken:str)->bool:
     try:
         obj_id=ObjectId(refreshToken)
     except errors.InvalidId:
         raise HTTPException(status_code=401,detail="Invalid Refresh Id")
     result = await db.refreshToken.find_one_and_delete({"_id":obj_id})
-    if result:
-        return True
+    return result is not None
 
 
 
@@ -83,62 +101,56 @@ def is_older_than_days(date_value, days=10):
     return (now - created_date) > timedelta(days=days)
 
 
-async def get_access_tokens(accessToken:str)->accessTokenOut:
-    
-    token = await db.accessToken.find_one({"_id": ObjectId(accessToken)})
+async def get_access_tokens(accessToken:str)->accessTokenOut | None:
+    try:
+        token_id = ObjectId(accessToken)
+    except errors.InvalidId:
+        return None
+    token = await db.accessToken.find_one({"_id": token_id})
     if token:
-        if is_older_than_days(date_value=token['dateCreated'])==False:
-            if token.get("role",None)=="member":
+        date_created = token.get("dateCreated")
+        is_expired = (not date_created) or is_older_than_days(date_value=date_created)
+        if is_expired:
+            await delete_access_token(accessToken=str(token['_id']))
+            return None
+        if token.get("role",None)=="member":
+            tokn = accessTokenOut(**token)
+            return tokn
+        elif token.get("role",None)=="admin":
+            if token.get('status',None)=="active":
                 tokn = accessTokenOut(**token)
                 return tokn
-            elif token.get("role",None)=="admin":
-                if token.get('status',None)=="active":
-                    tokn = accessTokenOut(**token)
-                    return tokn
-                else: 
-                    return None
             else:
                 return None
-            
         else:
-            delete_access_token(accessToken=str(token['_id'])) 
             return None
     else:
-        print("No token found")
-        return "None"
-    
-    
-    
-async def get_admin_access_tokens(accessToken:str)->accessTokenOut:
-    
-    token = await db.accessToken.find_one({"_id": ObjectId(accessToken)})
-    print(token)
-    if token:
-        if is_older_than_days(date_value=token['dateCreated'])==False:
-            if token.get("role",None)=="admin":
-                userId = token.get("userId")
-                if await get_admin(filter_dict={"_id":ObjectId(userId)}):
-                
-                    tokn = accessTokenOut(**token)
-                    return tokn
-                else:
-                    print("not an admin access token")
-                    
-            elif token.get("role",None)=="admin":
-                if token.get('status',None)=="active":
-                    tokn = accessTokenOut(**token)
-                    return tokn
-                else: 
-                    return None
-            else:
-                return None
-            
-        else:
-            delete_access_token(accessToken=str(token['_id'])) 
-            return None
-    else:
-        print("No token foundddd")
         return None
+    
+    
+    
+async def get_admin_access_tokens(accessToken:str)->accessTokenOut | None:
+    try:
+        token_id = ObjectId(accessToken)
+    except errors.InvalidId:
+        return None
+    token = await db.accessToken.find_one({"_id": token_id})
+    if not token:
+        return None
+    date_created = token.get("dateCreated")
+    if not date_created or is_older_than_days(date_value=date_created):
+        await delete_access_token(accessToken=str(token['_id']))
+        return None
+    if token.get("role") != "admin":
+        return None
+    if token.get("status") not in (None, "active"):
+        return None
+    userId = token.get("userId")
+    if not userId:
+        return None
+    if not await get_admin(filter_dict={"_id":ObjectId(userId)}):
+        return None
+    return accessTokenOut(**token)
    
     
         
@@ -168,8 +180,12 @@ async def get_access_tokens_no_date_check(accessToken: str) -> accessTokenOut | 
         return None
 
     
-async def get_refresh_tokens(refreshToken:str)->refreshTokenOut:
-    token = await db.refreshToken.find_one({"_id": ObjectId(refreshToken)})
+async def get_refresh_tokens(refreshToken:str)->refreshTokenOut | None:
+    try:
+        token_id = ObjectId(refreshToken)
+    except errors.InvalidId:
+        return None
+    token = await db.refreshToken.find_one({"_id": token_id})
     if token:
         tokn = refreshTokenOut(**token)
         return tokn

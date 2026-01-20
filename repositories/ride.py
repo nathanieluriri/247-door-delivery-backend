@@ -40,6 +40,11 @@ async def create_ride(ride_data: RideCreate) -> RideOut:
     return returnable_result
 
 async def get_ride(filter_dict: dict) -> Optional[RideOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ride filter is required."
+        )
     try:
         result = await db.rides.find_one(filter_dict)
 
@@ -54,14 +59,17 @@ async def get_ride(filter_dict: dict) -> Optional[RideOut]:
             detail=f"An error occurred while fetching ride: {str(e)}"
         )
     
-async def get_rides(filter_dict: dict = {},start=0,stop=100) -> List[RideOut]:
+async def get_rides(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[RideOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.rides.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         ride_list = []
 
@@ -76,18 +84,40 @@ async def get_rides(filter_dict: dict = {},start=0,stop=100) -> List[RideOut]:
             detail=f"An error occurred while fetching rides: {str(e)}"
         )
 async def update_ride(filter_dict: dict, ride_data: RideUpdate) -> RideOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ride filter is required."
+        )
+    update_doc = ride_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No ride fields to update."
+        )
     result = await db.rides.find_one_and_update(
         filter_dict,
-        {"$set": ride_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found."
+        )
     returnable_result = RideOut(**result)
     return returnable_result
 
 async def delete_ride(filter_dict: dict):
     from bson import ObjectId
     from bson.errors import InvalidId
-    
+
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ride filter is required."
+        )
+
     if "_id" in filter_dict and isinstance(filter_dict["_id"], str):
         try:
             
@@ -96,4 +126,10 @@ async def delete_ride(filter_dict: dict):
             
             pass 
 
-    return await db.rides.delete_one(filter_dict)
+    result = await db.rides.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found."
+        )
+    return result

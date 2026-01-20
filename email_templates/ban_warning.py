@@ -1,13 +1,15 @@
 from string import Template
 import os
 from dotenv import load_dotenv
+from . import render_localized_template
 
 load_dotenv()
 
 # Choose between 'sqlite' or 'mongodb'
 DB_NAME = os.getenv("DB_NAME", "test").lower()
 
-account_banned_template_string = Template("""
+account_banned_html_templates = {
+    "en": Template("""
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -188,13 +190,56 @@ account_banned_template_string = Template("""
   </body>
 </html>
 """)
+}
 
-def generate_account_banned_email_from_template(firstName, lastName, reason="Violation of Terms of Service"):
-    generated_email = account_banned_template_string.safe_substitute(
-        DB_NAME=DB_NAME,
-        helpful_img="https://iili.io/3DKqndN.jpg", # You might want to switch this to a warning icon
-        firstName=firstName,
-        lastName=lastName,
-        reason=reason
+account_banned_text_templates = {
+    "en": Template("""Account suspended
+
+Hi $firstName $lastName,
+
+We are writing to inform you that your $DB_NAME account has been suspended indefinitely due to a violation of our Terms of Service.
+
+Reason for suspension:
+$reason
+
+As a result, you can no longer access your account or perform any actions on our platform.
+
+If you believe this action was taken in error, you may file an appeal by contacting our support team directly.
+
+Regards,
+The $DB_NAME Team
+
+Somewhere Between Coffee & Code, Quiet Meadows, Earth 00000
+(c) 2025 $DB_NAME, LLC
+For appeals contact support@$DB_NAME.com.ng
+""")
+}
+
+def generate_account_banned_email_from_template(
+    firstName,
+    lastName,
+    reason="Violation of Terms of Service",
+    locale="en",
+    return_format="html",
+):
+    values = {
+        "DB_NAME": DB_NAME,
+        "helpful_img": "https://iili.io/3DKqndN.jpg",
+        "firstName": firstName,
+        "lastName": lastName,
+        "reason": reason,
+    }
+    html_body = render_localized_template(
+        account_banned_html_templates, locale, values, html=True
     )
-    return generated_email
+    text_body = render_localized_template(
+        account_banned_text_templates, locale, values, html=False
+    )
+
+    if return_format == "html":
+        return html_body
+    if return_format == "text":
+        return text_body
+    if return_format == "both":
+        return {"html": html_body, "text": text_body}
+    raise ValueError("return_format must be 'html', 'text', or 'both'.")

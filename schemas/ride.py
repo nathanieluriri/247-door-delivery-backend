@@ -49,16 +49,16 @@ class RideUpdate(BaseModel):
 
 class RideOut(RideBase):
     paymentStatus:bool = Field(default=False)
-    price:float
+    price: Optional[float] = None
     rideStatus:Optional[RideStatus]=RideStatus.pendingPayment
     driverId:Optional[str]=None
     userId:str
     invoiceData:Optional[InvoiceData]=None
     checkoutSessionObject:Optional[CheckoutSessionObject]=None
     stripeEvent:Optional[StripeEvent]=None
-    origin:Location
+    origin: Optional[Location] = None
     paymentLink:Optional[str]=None
-    map: DeliveryRouteResponse
+    map: Optional[DeliveryRouteResponse] = None
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

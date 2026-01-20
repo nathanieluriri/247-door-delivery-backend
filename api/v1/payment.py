@@ -13,6 +13,17 @@ retrieve_stripe_events
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
+def contains_mongo_operators(value):
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if isinstance(key, str) and key.startswith("$"):
+                return True
+            if contains_mongo_operators(nested):
+                return True
+    elif isinstance(value, list):
+        return any(contains_mongo_operators(item) for item in value)
+    return False
+
 
 # ------------------------------
 # List Payments (with pagination and filtering)
@@ -32,6 +43,7 @@ async def list_stripe_events(
     - Priority 3: Default (first 100)
     """
     PAGE_SIZE = 50
+    MAX_PAGE_SIZE = 200
     parsed_filters = {}
 
     # 1. Handle Filters
@@ -43,6 +55,11 @@ async def list_stripe_events(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid JSON format for 'filters' query parameter."
             )
+        if contains_mongo_operators(parsed_filters):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Operators are not allowed in 'filters' query parameter."
+            )
 
     # 2. Determine Pagination
     # Case 1: Prefer start/stop if provided
@@ -51,6 +68,8 @@ async def list_stripe_events(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Both 'start' and 'stop' must be provided together.")
         if stop < start:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'stop' cannot be less than 'start'.")
+        if stop - start > MAX_PAGE_SIZE:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Requested range exceeds max page size of {MAX_PAGE_SIZE}.")
         
         # Pass filters to the service layer
         items = await retrieve_stripe_events(filters=parsed_filters, start=start, stop=stop)
@@ -63,6 +82,8 @@ async def list_stripe_events(
         
         start_index = page_number * PAGE_SIZE
         stop_index = start_index + PAGE_SIZE
+        if stop_index - start_index > MAX_PAGE_SIZE:
+            stop_index = start_index + MAX_PAGE_SIZE
         # Pass filters to the service layer
         items = await retrieve_stripe_events(filters=parsed_filters, start=start_index, stop=stop_index)
         return APIResponse(status_code=200, data=items, detail=f"Fetched page {page_number} successfully")

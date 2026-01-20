@@ -18,7 +18,6 @@ class PlaceBase(BaseModel):
     name: str
     address: str
     place_id: str
-    address: str
     lat: float
     lng: float
 

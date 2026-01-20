@@ -1,10 +1,9 @@
 
-import json
-from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path,Depends
+import os
+from urllib.parse import urlencode
+from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path, Depends
 from typing import List, Optional
-from core.redis_cache import async_redis
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import RedirectResponse, StreamingResponse
 from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
@@ -18,6 +17,7 @@ from schemas.payout import (
     PayoutBalanceOut,
     PayoutRequestIn,
 )
+from repositories.tokens_repo import delete_access_token, delete_refresh_tokens_by_previous_access_token
 from services.payout_service import (
     add_payout,
     remove_payout,
@@ -50,15 +50,15 @@ from services.driver_service import (
     oauth
 
 )
-from security.auth import verify_any_token,verify_token_to_refresh,verify_token_driver_role
+from security.auth import verify_token_to_refresh, verify_token_driver_role
 from services.rating_service import add_rating, retrieve_rating_by_user_id
 from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
-import asyncio
+from services.sse_service import stream_events
 
 
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
-# simple in-memory subscribers store
-driver_subscribers: set[asyncio.Queue] = set()
+SUCCESS_PAGE_URL = os.getenv("SUCCESS_PAGE_URL", "http://localhost:8080/success")
+ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
 # --- Step 1: Redirect user to Google login ---
 @router.get("/google/auth")
 async def login(request: Request):
@@ -81,15 +81,24 @@ async def auth_callback(request: Request):
         new_data= DriverCreate(email=user_info["email"],password="",)
         old_data= DriverBase(email=user_info["email"],password="",)
         try:
-            driver= await add_driver(driver_data=new_data)
+            driver = await add_driver(driver_data=new_data)
         except:
-            
-           driver= await authenticate_driver(user_data=old_data)
+            driver = await authenticate_driver(user_data=old_data)
         # user_info.get("email_verified",False)
         # user_info.get("given_name",None)
         # user_info.get("family_name",None)
         # user_info.get("picture",None)
-        return APIResponse(status_code=200,detail="Successful Login",data=driver)
+        access_token = driver.access_token
+        refresh_token = driver.refresh_token
+        query = urlencode(
+            {
+                "status": "success",
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+            }
+        )
+        success_url = f"{SUCCESS_PAGE_URL}?{query}"
+        return RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
     else:
         raise HTTPException(status_code=400,detail={"status": "failed", "message": "No user info found"})
 
@@ -151,6 +160,16 @@ async def delete_user_account(token:accessTokenOut = Depends(verify_token_driver
     result = await remove_driver(driver_id=token.userId)
     return APIResponse(data=result,status_code=200,detail="Successfully deleted account")
 
+@router.post("/logout", dependencies=[Depends(verify_token_driver_role)])
+async def logout_driver(token: accessTokenOut = Depends(verify_token_driver_role)):
+    if not token.accesstoken:
+        raise HTTPException(status_code=400, detail="Invalid access token")
+    await delete_refresh_tokens_by_previous_access_token(accessToken=token.accesstoken)
+    deleted = await delete_access_token(accessToken=token.accesstoken)
+    if not deleted:
+        raise HTTPException(status_code=400, detail="Access token already invalidated")
+    return APIResponse(status_code=200, data=True, detail="Logged out successfully")
+
 
 
 # -------------------------------
@@ -173,7 +192,7 @@ async def rate_rider_after_ride(rating_data:RatingBase,token:accessTokenOut = De
 
     
     rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
-    rating = add_rating(rating_data=rider_rating,driverId=token.userId)
+    rating = await add_rating(rating_data=rider_rating,driverId=token.userId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Rider")
 
 
@@ -611,33 +630,15 @@ async def subscribe_to_general_ride_events_to_be_able_accept_rides_once_they_are
     """
     SSE endpoint for drivers to receive ride notifications.
 
-    - Global channel 'drivers:all' → broadcasts to all drivers
-    - Private channel 'driver:{userId}:events' → private messages to the driver
+    Events are re-sent until acknowledged via the SSE ack endpoint.
     """
-    pubsub = async_redis.pubsub()
-    await pubsub.subscribe(
-        "drivers:all",                 # global notifications
-        f"driver:{token.userId}:events"  # private notifications
-    )
-
-    async def event_generator():
-        try:
-            async for message in pubsub.listen():
-                if await request.is_disconnected():
-                    break
-
-                if message["type"] == "message":
-                    yield f"data: {message['data']}\n\n"
-        finally:
-            await pubsub.unsubscribe(
-                "drivers:all",
-                f"driver:{token.userId}:events"
-            )
-            await pubsub.close()
-
     return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream"
+        stream_events(
+            request=request,
+            user_type="driver",
+            user_id=token.userId,
+        ),
+        media_type="text/event-stream",
     )
     
 @router.get(
@@ -659,39 +660,24 @@ async def subscribe_to_specific_ride_lifecycle_events_for_active_navigation_and_
 ):
     """
     SSE endpoint for monitoring a specific active ride.
-    
-    Channels subscribed:
-    - 'ride:{ride_id}:events' → General status updates (cancelled, completed, paid)
-    - 'ride:{ride_id}:chat'   → Direct messages from the passenger
+
+    Events are re-sent until acknowledged via the SSE ack endpoint.
     """
     
-    # In a real app, you would verify here that the driver (token.userId) 
-    # is actually assigned to this specific ride_id before allowing subscription.
-    
-    pubsub = async_redis.pubsub()
-    await pubsub.subscribe(
-        f"ride:{ride_id}:events",  # Status changes (e.g., "rider_cancelled", "payment_success")
-       
-    )
-
-    async def event_generator():
-        try:
-            async for message in pubsub.listen():
-                if await request.is_disconnected():
-                    break
-
-                if message["type"] == "message":
-                    # We might want to parse the data to wrap it or filter it, 
-                    # but for raw forwarding:
-                    yield f"data: {message['data']}\n\n"
-        finally:
-            await pubsub.unsubscribe(
-                f"ride:{ride_id}:events" 
-              
-            )
-            await pubsub.close()
+    ride = await retrieve_ride_by_ride_id(id=ride_id)
+    if not ride or ride.driverId != token.userId:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ride access denied",
+        )
 
     return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream"
+        stream_events(
+            request=request,
+            user_type="driver",
+            user_id=token.userId,
+            event_types=["ride_status_update", "chat_message"],
+            ride_id=ride_id,
+        ),
+        media_type="text/event-stream",
     )

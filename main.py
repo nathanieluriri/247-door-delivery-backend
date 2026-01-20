@@ -11,7 +11,6 @@ from schemas.response_schema import APIResponse
 from repositories.tokens_repo import get_access_tokens_no_date_check
 from limits import parse
 import time   
-from web_socket_handler import *
 import os
 from pymongo import ASCENDING
 from celery_worker import celery_app
@@ -25,7 +24,7 @@ from core.database import db
 from security.encrypting_jwt import decode_jwt_token
 from redis_om import Migrator
 from starlette.concurrency import run_in_threadpool
-from web_socket_handler.broadcasts.nearby_drivers import broadcast_ride_request
+from services.sse_service import publish_ride_request
 
 
 MONGO_URI = os.getenv("MONGO_URL")
@@ -128,7 +127,7 @@ storage = RedisStorage(
 limiter = FixedWindowRateLimiter(storage)
 
 RATE_LIMITS = {
-    "annonymous": parse("120/minute"),
+    "anonymous": parse("120/minute"),
     "member": parse("160/minute"),
     "admin": parse("240/minute"),
 }
@@ -382,22 +381,16 @@ async def health_check():
     )
 
 
-@app.get("/test_broadcast",tags=["ws"])
-async def test_ws_broadcast(pickup_lat:float,pickup_lon:float):
-    data ={
-  "pickup": {
-    "lat": pickup_lat,
-    "lon": pickup_lon
-  },
-  "dropoff": {
-    "lat": 9.0706,
-    "lon": 7.4675
-  },
-  "vehicle_type": "CAR",
-  "fare_estimate":123445,
-  "ride_id":"1234567897542"
-}
-    await broadcast_ride_request(pickup_lat=pickup_lat,pickup_lon=pickup_lon,ride_data=data)
+@app.get("/test_broadcast", tags=["sse"])
+async def test_sse_broadcast(pickup_lat: float, pickup_lon: float):
+    await publish_ride_request(
+        ride_id="1234567897542",
+        pickup=f"{pickup_lat},{pickup_lon}",
+        destination="9.0706,7.4675",
+        vehicle_type="CAR",
+        fare_estimate=123445,
+        rider_id=None,
+    )
 
 
 
@@ -581,13 +574,14 @@ from api.v1.admin_route import router as v1_admin_route_router
 from api.v1.driver import router as v1_driver_router
 from api.v1.rider_route import router as v1_rider_route_router
 from api.v1.payment import router as v1_payment_router
+from api.v1.sse import router as v1_sse_router
 
 
 app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=False)
 app.include_router(v1_driver_router, prefix='/api/v1')
-app.include_router(v1_rider_route_router, prefix='/api/v1',include_in_schema=False)
+app.include_router(v1_rider_route_router, prefix='/api/v1')
 app.include_router(v1_payment_router, prefix='/api/v1',include_in_schema=False)
+app.include_router(v1_sse_router, prefix='/api/v1')
 # --- auto-routes-end ---
 
 
-socket_app = socketio.ASGIApp(sio, other_asgi_app=app)

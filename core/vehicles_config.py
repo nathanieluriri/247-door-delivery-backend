@@ -3,9 +3,6 @@
 from enum import Enum
 from pydantic import BaseModel
 
-from pydantic import BaseModel
-from enum import Enum
-
 class VehicleType(str, Enum):
     MOTOR_BIKE = "MOTOR_BIKE"
     CAR = "CAR"

@@ -22,6 +22,11 @@ async def create_address(address_data: AddressCreate) -> AddressOut:
     return returnable_result
 
 async def get_address(filter_dict: dict) -> Optional[AddressOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Address filter is required."
+        )
     try:
         result = await db.addresss.find_one(filter_dict)
 
@@ -36,14 +41,17 @@ async def get_address(filter_dict: dict) -> Optional[AddressOut]:
             detail=f"An error occurred while fetching address: {str(e)}"
         )
     
-async def get_addresss(filter_dict: dict = {},start=0,stop=100) -> List[AddressOut]:
+async def get_addresss(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[AddressOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.addresss.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         address_list = []
 
@@ -58,13 +66,40 @@ async def get_addresss(filter_dict: dict = {},start=0,stop=100) -> List[AddressO
             detail=f"An error occurred while fetching addresss: {str(e)}"
         )
 async def update_address(filter_dict: dict, address_data: AddressUpdate) -> AddressOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Address filter is required."
+        )
+    update_doc = address_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No address fields to update."
+        )
     result = await db.addresss.find_one_and_update(
         filter_dict,
-        {"$set": address_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Address not found."
+        )
     returnable_result = AddressOut(**result)
     return returnable_result
 
 async def delete_address(filter_dict: dict):
-    return await db.addresss.delete_one(filter_dict)
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Address filter is required."
+        )
+    result = await db.addresss.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Address not found."
+        )
+    return result

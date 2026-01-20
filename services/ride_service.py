@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from datetime import timezone
 utc = timezone.utc
 from core.payments import PaymentService, get_payment_service
+from services.sse_service import publish_ride_status_update, publish_ride_request
 from repositories.ride import (
     check_if_user_has_an_existing_active_ride,
     create_ride,
@@ -92,7 +93,21 @@ async def add_ride(
     await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
     ride = await create_ride(ride_data)
     payment = await payment_service.create_payment_link(ride_id=ride.id)
-    ride.paymentLink= payment
+    ride = await update_ride(
+        {"_id": ObjectId(ride.id)},
+        RideUpdate(paymentLink=payment),
+    )
+    try:
+        await publish_ride_request(
+            ride_id=ride.id,
+            pickup=ride.pickup,
+            destination=ride.destination,
+            vehicle_type=str(ride.vehicleType),
+            fare_estimate=ride.price,
+            rider_id=ride.userId,
+        )
+    except Exception:
+        pass
     
     pending_state_removal_run_time = datetime.now(utc) + timedelta(seconds=240)
 
@@ -308,16 +323,29 @@ async def update_ride_by_id(
         if refund_percentage is not None:
             try:
                 payment_service = get_payment_service()
+                if ride.price is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Ride price is missing for refund",
+                    )
                 unit_amount = int(ride.price / 10)
 
                 refund_amount = int(
                     Decimal(unit_amount) * Decimal(str(refund_percentage))
                 )
 
-                payment_service.refund(
+                if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Missing payment intent for refund",
+                    )
+
+                await payment_service.refund(
                     payment_intent_id=ride.checkoutSessionObject.payment_intent,
                     amount=refund_amount,
                 )
+            except HTTPException:
+                raise
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -336,14 +364,18 @@ async def update_ride_by_id(
             detail="Ride not found or update failed",
         )
 
-    # 8️⃣ Emit WebSocket status update if status changed
+    # 8️⃣ Emit SSE status update if status changed
     if ride_data.rideStatus is not None and ride_data.rideStatus != ride.rideStatus:
         try:
-            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
-             
-            await emit_ride_status_update(ride_id, ride_data.rideStatus, {"message": f"Ride status changed to {ride_data.rideStatus.value}"},10)
+            await publish_ride_status_update(
+                ride_id=ride_id,
+                status=ride_data.rideStatus,
+                rider_id=ride.userId,
+                driver_id=ride.driverId,
+                message=f"Ride status changed to {ride_data.rideStatus.value}",
+            )
         except Exception as e:
-            print(f"Warning: Failed to emit WebSocket update for ride {ride_id}: {e}")
+            print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
 
     return result
 
@@ -371,8 +403,18 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     if (ride.rideStatus==RideStatus.findingDriver or ride.rideStatus==RideStatus.pendingPayment) and (ride_data.rideStatus==RideStatus.canceled):
         try:
             payment_service = get_payment_service()
+            if ride.price is None:
+                raise HTTPException(status_code=400, detail="Ride price is missing for refund")
             unit_amount = int(ride.price / 10)
-            payment_service.refund(payment_intent_id=ride.checkoutSessionObject.payment_intent,amount=(unit_amount*0.95))
+            if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
+                raise HTTPException(status_code=400, detail="Missing payment intent for refund")
+            refund_amount = int(Decimal(unit_amount) * Decimal("0.95"))
+            await payment_service.refund(
+                payment_intent_id=ride.checkoutSessionObject.payment_intent,
+                amount=refund_amount,
+            )
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500,detail=f"Exception occured while processing a refund due to a canceled ride in 'update_ride_by_id_admin_func' {e}")    
         
@@ -381,14 +423,18 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     if not result:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")
 
-    # Emit WebSocket status update if status changed
+    # Emit SSE status update if status changed
     if ride_data.rideStatus is not None and ride_data.rideStatus != ride.rideStatus:
         try:
-            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
-             
-            await emit_ride_status_update(ride_id, ride_data.rideStatus, {"message": f"Ride status changed to {ride_data.rideStatus.value}"},10)
+            await publish_ride_status_update(
+                ride_id=ride_id,
+                status=ride_data.rideStatus,
+                rider_id=ride.userId,
+                driver_id=ride.driverId,
+                message=f"Ride status changed to {ride_data.rideStatus.value}",
+            )
         except Exception as e:
-            print(f"Warning: Failed to emit WebSocket update for ride {ride_id}: {e}")
+            print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
     
         
     return result
@@ -405,6 +451,8 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
     Returns:
         _type_: RideOut
     """
+    if not ObjectId.is_valid(ride_id):
+        raise HTTPException(status_code=400, detail="Invalid ride ID format")
     filter_dict={}
     filter_dict["_id"] = ObjectId(ride_id)
     
@@ -417,14 +465,18 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")
     # TODO: HAVE A LOGIC CASE FOR CONTAINING
      
-    # Emit WebSocket status update if status changed
+    # Emit SSE status update if status changed
     if ride_data.rideStatus is not None and current_ride and ride_data.rideStatus != current_ride.rideStatus:
         try:            
-            from web_socket_handler.server_to_client.ride_updates import emit_ride_status_update
-             
-            await emit_ride_status_update(ride_id, ride_data.rideStatus, {"message": f"Ride status changed to {ride_data.rideStatus.value}"},10)
+            await publish_ride_status_update(
+                ride_id=ride_id,
+                status=ride_data.rideStatus,
+                rider_id=current_ride.userId,
+                driver_id=current_ride.driverId,
+                message=f"Ride status changed to {ride_data.rideStatus.value}",
+            )
         except Exception as e:
-            print(f"Warning: Failed to emit WebSocket update for ride {ride_id}: {e}")
+            print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
     
     return result.model_dump()
 

@@ -22,6 +22,11 @@ async def create_rating(rating_data: RatingCreate) -> RatingOut:
     return returnable_result
 
 async def get_rating(filter_dict: dict) -> Optional[RatingOut]:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rating filter is required."
+        )
     try:
         result = await db.ratings.find_one(filter_dict)
 
@@ -71,14 +76,17 @@ async def get_user_rating_summary(user_id: str) -> RatingSummary:
             detail=f"Failed to retrieve user rating summary: {str(e)}"
         )
     
-async def get_ratings(filter_dict: dict = {},start=0,stop=100) -> List[RatingOut]:
+async def get_ratings(filter_dict: Optional[dict] = None,start=0,stop=100) -> List[RatingOut]:
     try:
-        if filter_dict is None:
-            filter_dict = {}
+        filter_dict = filter_dict or {}
+        start = max(0, start or 0)
+        if stop is None:
+            stop = start + 100
+        limit = max(0, stop - start)
 
         cursor = (db.ratings.find(filter_dict)
         .skip(start)
-        .limit(stop - start)
+        .limit(limit)
         )
         rating_list = []
 
@@ -93,13 +101,40 @@ async def get_ratings(filter_dict: dict = {},start=0,stop=100) -> List[RatingOut
             detail=f"An error occurred while fetching ratings: {str(e)}"
         )
 async def update_rating(filter_dict: dict, rating_data: RatingUpdate) -> RatingOut:
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rating filter is required."
+        )
+    update_doc = rating_data.model_dump(exclude_none=True)
+    if not update_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No rating fields to update."
+        )
     result = await db.ratings.find_one_and_update(
         filter_dict,
-        {"$set": rating_data.model_dump(exclude_none=True)},
+        {"$set": update_doc},
         return_document=ReturnDocument.AFTER
     )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rating not found."
+        )
     returnable_result = RatingOut(**result)
     return returnable_result
 
 async def delete_rating(filter_dict: dict):
-    return await db.ratings.delete_one(filter_dict)
+    if not filter_dict:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rating filter is required."
+        )
+    result = await db.ratings.delete_one(filter_dict)
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rating not found."
+        )
+    return result

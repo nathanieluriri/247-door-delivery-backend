@@ -1,5 +1,6 @@
 import os
 from abc import ABC, abstractmethod
+from typing import Optional
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -37,12 +38,19 @@ class StaffPaymentProvider(ABC):
 
     @abstractmethod
     async def create_transfer(self, stripe_account_id: str, amount: int, currency: str = "gbp",
-                            description: str = None, metadata: dict = None) -> dict:
+                            description: Optional[str] = None, metadata: Optional[dict] = None) -> dict:
         """Transfer money from platform to driver's Stripe account."""
         pass
 
     @abstractmethod
-    async def create_payout(self, stripe_account_id: str, amount: int, currency: str = "gbp") -> dict:
+    async def create_payout(
+        self,
+        stripe_account_id: str,
+        amount: int,
+        currency: str = "gbp",
+        description: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> dict:
         """Create an instant payout to driver's bank account."""
         pass
 
@@ -215,9 +223,11 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
             if metadata:
                 transfer_params["metadata"] = metadata
 
+            idempotency_key = f"transfer:{stripe_account_id}:{amount}:{description or ''}"
             transfer = await run_in_threadpool(
                 stripe.Transfer.create,
-                **transfer_params
+                **transfer_params,
+                idempotency_key=idempotency_key,
             )
 
             return {
@@ -231,7 +241,14 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
         except stripe.error.StripeError as e:
             raise HTTPException(status_code=400, detail=f"Failed to create transfer: {str(e)}")
 
-    async def create_payout(self, stripe_account_id: str, amount: int, currency: str = "gbp") -> dict:
+    async def create_payout(
+        self,
+        stripe_account_id: str,
+        amount: int,
+        currency: str = "gbp",
+        description: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> dict:
         """
         Create an instant payout to driver's bank account.
 
@@ -250,16 +267,23 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
             HTTPException: If payout fails
         """
         try:
+            payout_metadata = {
+                "driver_account": stripe_account_id,
+                "payout_type": "instant",
+            }
+            if metadata:
+                payout_metadata.update(metadata)
+
+            idempotency_key = f"payout:{stripe_account_id}:{amount}:{description or ''}"
             payout = await run_in_threadpool(
                 stripe.Payout.create,
                 amount=amount,
                 currency=currency,
                 stripe_account=stripe_account_id,
                 method="instant",  # Instant payout to bank
-                metadata={
-                    "driver_account": stripe_account_id,
-                    "payout_type": "instant"
-                }
+                description=description,
+                metadata=payout_metadata,
+                idempotency_key=idempotency_key,
             )
 
             return {
@@ -433,7 +457,7 @@ class StaffPaymentService:
             raise HTTPException(status_code=400, detail="Driver is not eligible for payouts")
 
         # Calculate platform fee and driver amount
-        platform_fee = int(amount * STRIPE_PLATFORM_FEE_PERCENT)
+        platform_fee = int(round(amount * STRIPE_PLATFORM_FEE_PERCENT))
         driver_amount = amount - platform_fee
 
         metadata = {

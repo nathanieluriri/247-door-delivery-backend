@@ -30,6 +30,8 @@ CACHE_TTL = 14 * 24 * 60 * 60  # 1209600 seconds
 
 async def get_autocomplete(input_text: str, country: str | None = None):
     """Fetch autocomplete suggestions from cache or Google Places API."""
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     cache_key = f"autocomplete:{country or 'any'}:{input_text.lower().strip()}"
 
     # ✅ Check cache first
@@ -101,6 +103,8 @@ async def get_autocomplete(input_text: str, country: str | None = None):
 
 async def get_place_details(place_id: str):
     """Fetch detailed place info from cache or Google Places API."""
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     cache_key = f"place_details:{place_id}"
 
     # ✅ Check cache first
@@ -151,43 +155,6 @@ async def get_place_details(place_id: str):
         status_code=200
     )
 
-
-
-async def get_place_details(place_id: str):
-    """Fetch detailed place info from cache or Google Places API."""
-    cache_key = f"place_details:{place_id}"
-
-    # ✅ Check cache first
-    cached_data = cache_db.get(cache_key)
-    if cached_data:
-        result_data= json.loads(cached_data)
-        response = APIResponse(data=result_data,detail="Successfully retrieved place data from cache",status_code=200)
-        return response
-
-    # 🔍 Not in cache — fetch from Google
-    params = {"place_id": place_id, "key": API_KEY}
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/details/json", params=params)
-        data = response.json()
-
-    if data.get("status") != "OK":
-        raise HTTPException(status_code=500,detail={"error": data.get("error_message", data.get("status"))}) 
-
-    result = data.get("result",None)
- 
-     
-    result_data = {
-        "name": result.get("name",None),
-        "address": result.get("formatted_address",None),
-        "lat": result.get('geometry', {}).get('location', {}).get('lat'),
-        "lng": result.get('geometry', {}).get('location', {}).get('lng'),
-    }
-    
-
-    # 💾 Store in Redis
-    cache_db.setex(cache_key, CACHE_TTL, json.dumps(result_data))
-    response = APIResponse(data=result_data,detail="Successfully retrieved place data",status_code=200)
-    return response
 
 
  

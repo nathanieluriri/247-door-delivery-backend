@@ -11,8 +11,6 @@ from bson import ObjectId
 from fastapi import HTTPException
 from bson.errors import InvalidId
 from typing import List
-from core.redis_cache import async_redis
-import json
 
 from repositories.reset_token import(
     create_reset_token,
@@ -32,14 +30,23 @@ from repositories.driver import (
     delete_driver,
 )
 from repositories.tokens_repo import add_access_tokens, add_refresh_tokens, delete_access_token, delete_refresh_token, get_refresh_tokens
-from schemas.driver import DriverBase, DriverCreate, DriverRefresh, DriverUpdate, DriverOut, DriverUpdatePassword
+from schemas.driver import (
+    DriverBase,
+    DriverCreate,
+    DriverRefresh,
+    DriverUpdate,
+    DriverOut,
+    DriverUpdatePassword,
+    DriverUpdateAccountStatus,
+)
 from schemas.imports import ALLOWED_ACCOUNT_STATUS_TRANSITIONS, AccountStatus, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse
 from schemas.tokens_schema import accessTokenCreate, refreshTokenCreate
-from security.encrypting_jwt import create_jwt_member_token, create_jwt_token
+from security.encrypting_jwt import  create_jwt_token
 from security.hash import check_password
 from authlib.integrations.starlette_client import OAuth
 
 from services.email_service import send_ban_warning, send_otp
+from services.sse_service import publish_ride_request, publish_ride_request_to_driver
 
 oauth = OAuth()
 oauth.register(
@@ -61,14 +68,14 @@ async def add_driver(driver_data: DriverCreate) -> DriverOut:
         new_driver= await create_driver(driver_data=driver_data)
         access_token = await add_access_tokens(token_data=accessTokenCreate(userId=new_driver.id))
         refresh_token  = await add_refresh_tokens(token_data=refreshTokenCreate(userId=new_driver.id,previousAccessToken=access_token.accesstoken))
-        token_activation = user.accountStatus==AccountStatus.ACTIVE
-        token = create_jwt_token(access_token=access_token.accesstoken,user_id=user.id,user_type="DRIVER",is_activated=token_activation)
+        token_activation = new_driver.accountStatus==AccountStatus.ACTIVE
+        token = create_jwt_token(access_token=access_token.accesstoken,user_id=new_driver.id,user_type="DRIVER",is_activated=token_activation)
+        new_driver.password = ""
         new_driver.access_token= token
         new_driver.refresh_token = refresh_token.refreshtoken
         return new_driver
     else:
-        raise HTTPException(status_code=409,detail="Rider Already exists")
-    return await create_driver(driver_data)
+        raise HTTPException(status_code=409,detail="Driver Already exists")
 
 
 async def remove_driver(driver_id: str):
@@ -143,6 +150,10 @@ async def authenticate_driver(user_data:DriverBase )->DriverOut:
 async def refresh_driver_tokens_reduce_number_of_logins(user_refresh_data:DriverRefresh,expired_access_token):
     refreshObj= await get_refresh_tokens(user_refresh_data.refresh_token)
     if refreshObj:
+        if not ObjectId.is_valid(refreshObj.userId):
+            await delete_refresh_token(refreshToken=user_refresh_data.refresh_token)
+            await delete_access_token(accessToken=expired_access_token)
+            raise HTTPException(status_code=401,detail="Invalid refresh token")
         if refreshObj.previousAccessToken==expired_access_token:
             user = await get_driver(filter_dict={"_id":ObjectId(refreshObj.userId)})
             
@@ -193,7 +204,7 @@ async def driver_reset_password_intiation(driver_details:ResetPasswordInitiation
         OTP=generate_otp()
         success = send_otp(otp=OTP,user_email=driver_details.email)
         if success==0:
-            token  = ResetTokenBase(userId=driver.id,userType=UserType.drver,otp=OTP)
+            token  = ResetTokenBase(userId=driver.id,userType=UserType.driver,otp=OTP)
             reset_token_create  =ResetTokenCreate(**token.model_dump())
             reset_token =  await create_reset_token(reset_token_data=reset_token_create)
             response = ResetPasswordInitiationResponse(resetToken=reset_token.id)
@@ -243,7 +254,7 @@ async def driver_reset_password_conclusion(
 
 async def update_driver_by_id_admin_func(
     driver_id: str,
-    driver_data: DriverUpdate,
+    driver_data: DriverUpdateAccountStatus,
 ) -> DriverOut:
     """
     Update driver entry with state validation and no-op prevention.
@@ -254,6 +265,9 @@ async def update_driver_by_id_admin_func(
         raise HTTPException(status_code=400, detail="Invalid driver ID format")
 
     filter_dict = {"_id": ObjectId(driver_id)}
+
+    if driver_data.accountStatus is None:
+        raise HTTPException(status_code=400, detail="Account status is required")
 
     # 2️⃣ Fetch existing driver
     existing_driver = await get_driver(filter_dict)
@@ -302,10 +316,10 @@ async def update_driver_by_id_admin_func(
 # -------------------------------------
 
 async def ban_drivers(user_id: str, user:dict) -> dict:
-    user_data= DriverUpdate(**user)
-    update =await update_driver_by_id_admin_func(user_id=user_id,user_data=user_data)
+    user_data= DriverUpdateAccountStatus(**user)
+    update =await update_driver_by_id_admin_func(driver_id=user_id,driver_data=user_data)
     rider = await retrieve_driver_by_driver_id(id=user_id)
-    send_ban_warning(rider.firstName,rider.lastName)
+    send_ban_warning(rider.email,rider.firstName,rider.lastName)
     
     
     
@@ -319,18 +333,16 @@ async def notify_all_drivers_new_ride(
     pickup: str,
     destination: str,
     fare: int,
+    vehicle_type: str = "UNKNOWN",
+    rider_id: str | None = None,
 ):
-    payload = {
-        "event": "ride_request",
-        "ride_id": ride_id,
-        "pickup": pickup,
-        "destination": destination,
-        "fare": fare,
-    }
-
-    await async_redis.publish(
-        "drivers:all",
-        json.dumps(payload)
+    await publish_ride_request(
+        ride_id=ride_id,
+        pickup=pickup,
+        destination=destination,
+        vehicle_type=vehicle_type,
+        fare_estimate=fare,
+        rider_id=rider_id,
     )
     
     
@@ -341,16 +353,15 @@ async def notify_driver_new_ride(
     pickup: str,
     destination: str,
     fare: int,
+    vehicle_type: str = "UNKNOWN",
+    rider_id: str | None = None,
 ):
-    payload = {
-        "event": "ride_request",
-        "ride_id": ride_id,
-        "pickup": pickup,
-        "destination": destination,
-        "fare": fare,
-    }
-
-    await async_redis.publish(
-        f"driver:{driver_id}:events",
-        json.dumps(payload)
+    await publish_ride_request_to_driver(
+        driver_id=driver_id,
+        ride_id=ride_id,
+        pickup=pickup,
+        destination=destination,
+        vehicle_type=vehicle_type,
+        fare_estimate=fare,
+        rider_id=rider_id,
     )

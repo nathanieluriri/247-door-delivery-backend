@@ -1,6 +1,6 @@
 # Rider API Documentation
 
-This document provides comprehensive documentation for all REST API endpoints and WebSocket events available to riders in the Door Delivery Backend system.
+This document provides comprehensive documentation for all REST API endpoints and SSE streams available to riders in the Door Delivery Backend system.
 
 ## Authentication Flow
 
@@ -15,6 +15,12 @@ GET /api/v1/riders/google/auth
 - Redirects user to Google OAuth login
 - Returns redirect URL for Google authentication
 
+Schema Fields
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | empty | yes | Redirect response |
+
 **Step 2: Handle Google Callback**
 ```
 GET /api/v1/riders/auth/callback
@@ -22,6 +28,13 @@ GET /api/v1/riders/auth/callback
 - Handles the callback from Google OAuth
 - Creates or authenticates rider account
 - Returns authentication tokens as path of a query parameter to a frontend url specified
+
+Schema Fields
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
 ### Traditional Authentication
 
@@ -41,6 +54,33 @@ Content-Type: application/json
 - Password must be at least 8 characters
 - Returns rider data (password excluded)
 
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| firstName | string or null | no | First name |
+| lastName | string or null | no | Last name |
+| email | string (email) | yes | Rider email |
+| password | string or binary | yes | Password |
+| loginType | LoginType or null | no | password, passwordless, google |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.firstName | string or null | no | First name |
+| data.lastName | string or null | no | Last name |
+| data.email | string (email) | yes | Rider email |
+| data.password | string or binary | yes | Rider password value |
+| data.loginType | LoginType or null | no | password, passwordless, google |
+| data.accountStatus | AccountStatus or null | no | active, pendingVerification, suspended, banned, deactivated |
+| data.id | string or null | no | Rider id |
+| data.date_created | integer or null | no | Unix timestamp |
+| data.last_updated | integer or null | no | Unix timestamp |
+| data.refreshToken | string or null | no | Refresh token |
+| data.accessToken | string or null | no | Access token |
+
 **Login**
 ```
 POST /api/v1/riders/login
@@ -53,6 +93,33 @@ Content-Type: application/json
 ```
 - Authenticates existing rider
 - Returns rider data with tokens
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| firstName | string or null | no | First name |
+| lastName | string or null | no | Last name |
+| email | string (email) | yes | Rider email |
+| password | string or binary | yes | Password |
+| loginType | LoginType or null | no | password, passwordless, google |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.firstName | string or null | no | First name |
+| data.lastName | string or null | no | Last name |
+| data.email | string (email) | yes | Rider email |
+| data.password | string or binary | yes | Rider password value |
+| data.loginType | LoginType or null | no | password, passwordless, google |
+| data.accountStatus | AccountStatus or null | no | active, pendingVerification, suspended, banned, deactivated |
+| data.id | string or null | no | Rider id |
+| data.date_created | integer or null | no | Unix timestamp |
+| data.last_updated | integer or null | no | Unix timestamp |
+| data.refreshToken | string or null | no | Refresh token |
+| data.accessToken | string or null | no | Access token |
 
 **Token Refresh**
 ```
@@ -67,14 +134,55 @@ Content-Type: application/json
 - Refreshes expired access token
 - Requires expired access token in header and valid refresh token in body
 
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| refresh_token | string or null | no | Refresh token |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.firstName | string or null | no | First name |
+| data.lastName | string or null | no | Last name |
+| data.email | string (email) | yes | Rider email |
+| data.password | string or binary | yes | Rider password value |
+| data.loginType | LoginType or null | no | password, passwordless, google |
+| data.accountStatus | AccountStatus or null | no | active, pendingVerification, suspended, banned, deactivated |
+| data.id | string or null | no | Rider id |
+| data.date_created | integer or null | no | Unix timestamp |
+| data.last_updated | integer or null | no | Unix timestamp |
+| data.refreshToken | string or null | no | Refresh token |
+| data.accessToken | string or null | no | Access token |
+
 ## Profile Management
 
 **Get Rider Profile**
 ```
-GET /api/v1/riders/me
+GET /api/v1/riders/profile
 Authorization: Bearer <access_token>
 ```
 - Returns authenticated rider's profile information
+
+Schema Fields
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.firstName | string or null | no | First name |
+| data.lastName | string or null | no | Last name |
+| data.email | string (email) | yes | Rider email |
+| data.password | string or binary | yes | Rider password value |
+| data.loginType | LoginType or null | no | password, passwordless, google |
+| data.accountStatus | AccountStatus or null | no | active, pendingVerification, suspended, banned, deactivated |
+| data.id | string or null | no | Rider id |
+| data.date_created | integer or null | no | Unix timestamp |
+| data.last_updated | integer or null | no | Unix timestamp |
+| data.refreshToken | string or null | no | Refresh token |
+| data.accessToken | string or null | no | Access token |
 
 **Update Rider Profile**
 ```
@@ -83,12 +191,27 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
-  "name": "John Doe",
-  "phone": "+1234567890"
+  "firstName": "John",
+  "lastName": "Doe",
+  "last_updated": 1700000000
 }
 ```
 - Updates rider profile information
 - Requires rider role verification and active account status
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| firstName | string or null | no | First name |
+| lastName | string or null | no | Last name |
+| last_updated | integer | no | Unix timestamp |
+
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
 **Delete Rider Account**
 ```
@@ -97,6 +220,13 @@ Authorization: Bearer <access_token>
 ```
 - Permanently deletes rider account
 - Requires rider role verification and active account status
+
+
+Schema Fields
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
 ## Address Management
 
@@ -107,9 +237,22 @@ Authorization: Bearer <access_token>
 ```
 - Returns all saved addresses for the rider
 
+Schema Fields
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data[].placeId | string | yes | Place id |
+| data[].label | string | yes | Address label |
+| data[].userId | string | yes | Rider id |
+| data[].id | string or null | no | Address id |
+| data[].dateCreated | integer or null | no | Unix timestamp |
+| data[].lastUpdated | integer or null | no | Unix timestamp |
+
 **Create Address**
 ```
-POST /api/v1/riders/addresses
+POST /api/v1/riders/address
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
@@ -120,66 +263,206 @@ Content-Type: application/json
 ```
 - Saves a new address for quick access
 
-**Get Specific Address**
-```
-GET /api/v1/riders/addresses/{addressId}
-Authorization: Bearer <access_token>
-```
-- Returns details for a specific saved address
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| placeId | string | yes | Place id |
+| label | string | yes | Address label |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.placeId | string | yes | Place id |
+| data.label | string | yes | Address label |
+| data.userId | string | yes | Rider id |
+| data.id | string or null | no | Address id |
+| data.dateCreated | integer or null | no | Unix timestamp |
+| data.lastUpdated | integer or null | no | Unix timestamp |
 
 **Update Address**
 ```
-PATCH /api/v1/riders/addresses/{addressId}
+PATCH /api/v1/riders/address/{addressId}
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
   "label": "Work",
-  "address": "456 Office Blvd, San Francisco, CA"
+  "placeId": "place_id_from_google",
+  "last_updated": 1700000000
 }
 ```
 - Updates an existing saved address
 
+Schema Fields
+Path Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| addressId | string | yes | Address id |
+
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| label | string or null | no | Address label |
+| placeId | string or null | no | Place id |
+| last_updated | integer | no | Unix timestamp |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.placeId | string | yes | Place id |
+| data.label | string | yes | Address label |
+| data.userId | string | yes | Rider id |
+| data.id | string or null | no | Address id |
+| data.dateCreated | integer or null | no | Unix timestamp |
+| data.lastUpdated | integer or null | no | Unix timestamp |
+
 **Delete Address**
 ```
-DELETE /api/v1/riders/addresses/{addressId}
+DELETE /api/v1/riders/address/{addressId}
 Authorization: Bearer <access_token>
 ```
 - Removes a saved address
+
+Schema Fields
+Path Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| addressId | string | yes | Address id |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data | boolean (true) or null | yes | Deletion result |
 
 ## Place Services
 
 **Place Autocomplete**
 ```
-GET /api/v1/riders/places/autocomplete?query=San Francisco
+GET /api/v1/riders/place/autocomplete?input=San%20Francisco&country=us
 Authorization: Bearer <access_token>
 ```
 - Returns place suggestions based on search query
-- Uses Google Places API for autocomplete
+- `country` must be one of: us, ng, uk, ca, de, fr, au, jp
+
+Schema Fields
+Query Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| input | string | yes | User input text |
+| country | string | yes | us, ng, uk, ca, de, fr, au, jp |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data[].description | string | yes | Place description |
+| data[].name | string | yes | Place name |
+| data[].address | string | yes | Address |
+| data[].place_id | string | yes | Place id |
+| data[].lat | number | yes | Latitude |
+| data[].lng | number | yes | Longitude |
+
+**Allowed Countries Autocomplete**
+```
+GET /api/v1/riders/place/allowedCountries?input=San%20Francisco&country=us
+Authorization: Bearer <access_token>
+```
+- Alternative autocomplete endpoint with the same query parameters
+
+Schema Fields
+Query Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| input | string | yes | User input text |
+| country | string | yes | us, ng, uk, ca, de, fr, au, jp |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data[] | array[string] or null | no | List of values |
 
 **Get Place Details**
 ```
-GET /api/v1/riders/places/details/{placeId}
+GET /api/v1/riders/place/details?place_id=place_id_from_google
 Authorization: Bearer <access_token>
 ```
 - Returns detailed information for a specific place
 - Includes coordinates, address, and metadata
 
+Schema Fields
+Query Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| place_id | string | yes | Place id |
+
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
+
 **Calculate Fare**
 ```
-POST /api/v1/riders/places/fare
+POST /api/v1/riders/place/calculate-fare
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
-  "origin": "place_id_origin",
+  "pickup": "place_id_origin",
   "destination": "place_id_destination",
-  "vehicleType": "CAR",
   "stops": ["place_id_stop1", "place_id_stop2"]
 }
 ```
 - Calculates estimated fare for a route
-- Considers distance, time, vehicle type, and stops
+- Returns distance, duration, and fare details
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| pickup | string | yes | Pickup place id |
+| destination | string | yes | Destination place id |
+| stops | array[string] or null | no | Intermediate stops |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.origin.latitude | number | yes | Origin latitude |
+| data.origin.longitude | number | yes | Origin longitude |
+| data.bike_fare | number | yes | Bike fare |
+| data.bike.base_fare | number | yes | Base fare |
+| data.bike.distance_rate | number | yes | Distance rate |
+| data.bike.time_rate | number | yes | Time rate |
+| data.bike.seats | integer | yes | Seats |
+| data.bike.description | string | yes | Description |
+| data.bike.use | string | yes | Use case |
+| data.car_fare | number | yes | Car fare |
+| data.car.base_fare | number | yes | Base fare |
+| data.car.distance_rate | number | yes | Distance rate |
+| data.car.time_rate | number | yes | Time rate |
+| data.car.seats | integer | yes | Seats |
+| data.car.description | string | yes | Description |
+| data.car.use | string | yes | Use case |
+| data.map.totalDistanceMeters | integer | yes | Total distance |
+| data.map.totalDurationSeconds | integer | yes | Total duration |
+| data.map.encodedPolyline | string | yes | Encoded polyline |
+| data.map.waypointOrder | array[integer] or null | no | Optimized waypoint order |
+| data.map.legs[].startAddress | string | yes | Leg start address |
+| data.map.legs[].endAddress | string | yes | Leg end address |
+| data.map.legs[].distanceMeters | integer | yes | Leg distance |
+| data.map.legs[].durationSeconds | integer | yes | Leg duration |
 
 ## Rating System
 
@@ -190,12 +473,31 @@ Authorization: Bearer <access_token>
 ```
 - Returns rider's current rating and summary of ride history
 
+
+Schema Fields
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
+
 **View Driver Rating**
 ```
 GET /api/v1/riders/driver/{driverId}/rating
 Authorization: Bearer <access_token>
 ```
 - Returns specific driver's rating information
+
+Schema Fields
+Path Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| driverId | string | yes | Driver id |
+
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
 **Rate Driver After Ride**
 ```
@@ -204,32 +506,81 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
+  "rideId": "ride_id",
   "userId": "driver_id",
-  "rating": 5,
-  "comment": "Excellent driver!"
+  "rating": 5
 }
 ```
 - Allows rider to rate a driver after completing a ride
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| rideId | string | yes | Ride id |
+| userId | string | yes | Driver id |
+| rating | integer (1-5) | yes | Rating value |
+
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
 ## Ride Management
 
 **Request Ride**
 ```
-POST /api/v1/riders/ride
+POST /api/v1/riders/ride/request
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
   "pickup": "place_id_string",
   "destination": "place_id_string",
-  "vehicleType": "SEDAN",
+  "vehicleType": "CAR",
   "stops": ["place_id_1", "place_id_2"],
-  "paymentMethod": "CARD"
+  "pickupSchedule": 1700000000
 }
 ```
 - Creates a new ride request
 - Calculates route and fare automatically
 - Matches with nearby available drivers
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| pickup | string | yes | Pickup place id |
+| destination | string | yes | Destination place id |
+| stops | array[string] or null | no | Intermediate stops |
+| vehicleType | VehicleType | yes | MOTOR_BIKE or CAR |
+| pickupSchedule | integer or null | no | Unix timestamp |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.pickup | string | yes | Pickup place id |
+| data.destination | string | yes | Destination place id |
+| data.stops | array[string] or null | no | Intermediate stops |
+| data.vehicleType | VehicleType | yes | MOTOR_BIKE or CAR |
+| data.pickupSchedule | integer or null | no | Unix timestamp |
+| data.paymentStatus | boolean | no | Payment status |
+| data.price | number or null | no | Fare amount |
+| data.rideStatus | RideStatus or null | no | pendingPayment, findingDriver, arrivingToPickup, drivingToDestination, canceled, completed |
+| data.driverId | string or null | no | Driver id |
+| data.userId | string | yes | Rider id |
+| data.invoiceData | InvoiceData or null | no | Invoice object |
+| data.checkoutSessionObject | CheckoutSessionObject or null | no | Stripe checkout session |
+| data.stripeEvent | StripeEvent or null | no | Stripe event |
+| data.origin | Location or null | no | Origin coordinates |
+| data.paymentLink | string or null | no | Payment link |
+| data.map | DeliveryRouteResponse or null | no | Route summary |
+| data.id | string or null | no | Ride id |
+| data.dateCreated | integer or null | no | Unix timestamp |
+| data.lastUpdated | integer or null | no | Unix timestamp |
 
 **Get Ride Details**
 ```
@@ -237,6 +588,37 @@ GET /api/v1/riders/ride/{rideId}
 Authorization: Bearer <access_token>
 ```
 - Returns detailed information for a specific ride
+
+Schema Fields
+Path Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| rideId | string | yes | Ride id |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.pickup | string | yes | Pickup place id |
+| data.destination | string | yes | Destination place id |
+| data.stops | array[string] or null | no | Intermediate stops |
+| data.vehicleType | VehicleType | yes | MOTOR_BIKE or CAR |
+| data.pickupSchedule | integer or null | no | Unix timestamp |
+| data.paymentStatus | boolean | no | Payment status |
+| data.price | number or null | no | Fare amount |
+| data.rideStatus | RideStatus or null | no | pendingPayment, findingDriver, arrivingToPickup, drivingToDestination, canceled, completed |
+| data.driverId | string or null | no | Driver id |
+| data.userId | string | yes | Rider id |
+| data.invoiceData | InvoiceData or null | no | Invoice object |
+| data.checkoutSessionObject | CheckoutSessionObject or null | no | Stripe checkout session |
+| data.stripeEvent | StripeEvent or null | no | Stripe event |
+| data.origin | Location or null | no | Origin coordinates |
+| data.paymentLink | string or null | no | Payment link |
+| data.map | DeliveryRouteResponse or null | no | Route summary |
+| data.id | string or null | no | Ride id |
+| data.dateCreated | integer or null | no | Unix timestamp |
+| data.lastUpdated | integer or null | no | Unix timestamp |
 
 **View Ride History**
 ```
@@ -246,16 +628,108 @@ Authorization: Bearer <access_token>
 - Returns list of all rides completed by the rider
 - Includes ride details, costs, and ratings
 
+Schema Fields
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data[].pickup | string | yes | Pickup place id |
+| data[].destination | string | yes | Destination place id |
+| data[].stops | array[string] or null | no | Intermediate stops |
+| data[].vehicleType | VehicleType | yes | MOTOR_BIKE or CAR |
+| data[].pickupSchedule | integer or null | no | Unix timestamp |
+| data[].paymentStatus | boolean | no | Payment status |
+| data[].price | number or null | no | Fare amount |
+| data[].rideStatus | RideStatus or null | no | pendingPayment, findingDriver, arrivingToPickup, drivingToDestination, canceled, completed |
+| data[].driverId | string or null | no | Driver id |
+| data[].userId | string | yes | Rider id |
+| data[].invoiceData | InvoiceData or null | no | Invoice object |
+| data[].checkoutSessionObject | CheckoutSessionObject or null | no | Stripe checkout session |
+| data[].stripeEvent | StripeEvent or null | no | Stripe event |
+| data[].origin | Location or null | no | Origin coordinates |
+| data[].paymentLink | string or null | no | Payment link |
+| data[].map | DeliveryRouteResponse or null | no | Route summary |
+| data[].id | string or null | no | Ride id |
+| data[].dateCreated | integer or null | no | Unix timestamp |
+| data[].lastUpdated | integer or null | no | Unix timestamp |
+
 **Cancel Ride**
 ```
-PATCH /api/v1/riders/ride/{rideId}
+PATCH /api/v1/riders/ride/cancel/{rideId}
 Authorization: Bearer <access_token>
-Content-Type: application/json
-
- 
 ```
-- Cancels a pending or in-progress ride
+- Cancels a pending ride
 - May incur cancellation fees
+
+Schema Fields
+Path Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| rideId | string | yes | Ride id |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.pickup | string | yes | Pickup place id |
+| data.destination | string | yes | Destination place id |
+| data.stops | array[string] or null | no | Intermediate stops |
+| data.vehicleType | VehicleType | yes | MOTOR_BIKE or CAR |
+| data.pickupSchedule | integer or null | no | Unix timestamp |
+| data.paymentStatus | boolean | no | Payment status |
+| data.price | number or null | no | Fare amount |
+| data.rideStatus | RideStatus or null | no | pendingPayment, findingDriver, arrivingToPickup, drivingToDestination, canceled, completed |
+| data.driverId | string or null | no | Driver id |
+| data.userId | string | yes | Rider id |
+| data.invoiceData | InvoiceData or null | no | Invoice object |
+| data.checkoutSessionObject | CheckoutSessionObject or null | no | Stripe checkout session |
+| data.stripeEvent | StripeEvent or null | no | Stripe event |
+| data.origin | Location or null | no | Origin coordinates |
+| data.paymentLink | string or null | no | Payment link |
+| data.map | DeliveryRouteResponse or null | no | Route summary |
+| data.id | string or null | no | Ride id |
+| data.dateCreated | integer or null | no | Unix timestamp |
+| data.lastUpdated | integer or null | no | Unix timestamp |
+
+**Share Ride**
+```
+GET /api/v1/riders/ride/{rideId}/share
+Authorization: Bearer <access_token>
+```
+- Returns a public sharing link for the ride
+
+Schema Fields
+Path Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| rideId | string | yes | Ride id |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.pickup | string | yes | Pickup place id |
+| data.destination | string | yes | Destination place id |
+| data.stops | array[string] or null | no | Intermediate stops |
+| data.vehicleType | VehicleType | yes | MOTOR_BIKE or CAR |
+| data.pickupSchedule | integer or null | no | Unix timestamp |
+| data.paymentStatus | boolean | no | Payment status |
+| data.price | number or null | no | Fare amount |
+| data.rideStatus | RideStatus or null | no | pendingPayment, findingDriver, arrivingToPickup, drivingToDestination, canceled, completed |
+| data.driverId | string or null | no | Driver id |
+| data.userId | string | yes | Rider id |
+| data.invoiceData | InvoiceData or null | no | Invoice object |
+| data.checkoutSessionObject | CheckoutSessionObject or null | no | Stripe checkout session |
+| data.stripeEvent | StripeEvent or null | no | Stripe event |
+| data.origin | Location or null | no | Origin coordinates |
+| data.paymentLink | string or null | no | Payment link |
+| data.map | DeliveryRouteResponse or null | no | Route summary |
+| data.id | string or null | no | Ride id |
+| data.dateCreated | integer or null | no | Unix timestamp |
+| data.lastUpdated | integer or null | no | Unix timestamp |
 
 ## Payment Integration
  
@@ -270,11 +744,24 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
-  "currentPassword": "old_password",
-  "newPassword": "new_password123"
+  "password": "new_password123",
+  "last_updated": 1700000000
 }
 ```
 - Updates password for authenticated rider
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| password | string or binary or null | no | New password |
+| last_updated | integer | no | Unix timestamp |
+
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
 **Request Password Reset**
 ```
@@ -288,118 +775,116 @@ Content-Type: application/json
 - Initiates password reset process
 - Sends reset email to rider
 
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| email | string (email) | yes | Rider email |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data.resetToken | string | yes | Password reset token |
+
 **Confirm Password Reset**
 ```
 PATCH /api/v1/riders/password-reset/confirm
 Content-Type: application/json
 
 {
-  "token": "reset_token_from_email",
-  "newPassword": "new_password123"
+  "otp": "123456",
+  "resetToken": "reset_token_from_email",
+  "password": "new_password123"
 }
 ```
-- Completes password reset with token from email
+- Completes password reset with OTP and reset token
 
-## WebSocket Events
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| otp | string | yes | One-time passcode |
+| resetToken | string | yes | Password reset token |
+| password | string | yes | New password |
 
-Riders use WebSocket connections for real-time ride tracking and communication. All WebSocket events require prior authentication via REST API.
 
-### Connection & Authentication
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| body | object | no | Response schema not specified in OpenAPI |
 
-**Connect to WebSocket**
+## SSE Streams
+
+Riders receive real-time updates via Server-Sent Events (SSE). Streams require the `Authorization: Bearer <token>` header and deliver events until they are acknowledged.
+
+### Connect to the rider stream
 ```
-WebSocket URL: ws://localhost:8000/
-```
-
-**Authenticate After Connection**
-```javascript
-socket.emit('authenticate', {
-  token: "jwt_access_token"
-});
-```
-
-**Authentication Response**
-```javascript
-socket.on('authenticate_response', (response) => {
-  if (response.status === 'success') {
-    // Rider authenticated, can now use rider events
-    console.log(`Authenticated as ${response.user_type}: ${response.user_id}`);
-  }
-});
+GET /api/v1/sse/rider/stream
 ```
 
-### Ride Room Management
+Optional query params:
+- `event_types`: repeatable filter (e.g. `event_types=ride_status_update&event_types=chat_message`)
+- `ride_id`: only emit events for a specific ride
 
-**Join Ride Room**
-```javascript
-socket.emit('join_ride_room', {
-  ride_id: "ride_id_string"
-});
+Schema Fields
+Query Parameters
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| ride_id | string or null | no | Filter by ride id |
+| event_types | array[string] or null | no | Filter by event type |
+
+Response Stream
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| id | string | yes | SSE event id |
+| event | string | yes | SSE event name |
+| data.id | string | yes | Event id |
+| data.event | string | yes | Event name |
+| data.data | object | yes | Event payload |
+| data.createdAt | integer | yes | Unix timestamp |
+
+### Event format
+```
+id: <event_id>
+event: <event_type>
+data: {"id":"...","event":"...","data":{...},"createdAt":1700000000}
 ```
 
-**Join Ride Room Response**
-```javascript
-socket.on('join_ride_room_response', (response) => {
-  if (response.status === 'success') {
-    console.log('Joined ride room:', response.ride_data);
-    // Now receives real-time updates for this ride
-  }
-});
+### Acknowledge events
+```
+POST /api/v1/sse/rider/ack
+
+{"eventId":"<event_id>"}
 ```
 
-**Get Ride State**
-```javascript
-socket.emit('get_ride_state', {
-  ride_id: "ride_id_string"
-});
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| eventId | string | yes | SSE event id |
+
+Response Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| status_code | integer | yes | HTTP status code |
+| detail | string | yes | Message |
+| data | boolean or null | yes | Result flag |
+
+### curl smoke test
 ```
-
-**Get Ride State Response**
-```javascript
-socket.on('get_ride_state_response', (response) => {
-  if (response.status === 'success') {
-    console.log('Current ride state:', response.ride_data);
-  }
-});
-```
-
-### Ride Status Updates
-
-**Ride Status Update**
-```javascript
-socket.on('ride_status_update', (update) => {
-  console.log('Ride status update:', update);
-  // update contains: status, data, eta_minutes
-  switch(update.status) {
-    case 'REQUESTED':
-      // Ride requested, waiting for driver
-      break;
-    case 'ACCEPTED':
-      // Driver accepted, on the way
-      break;
-    case 'ARRIVED':
-      // Driver arrived at pickup
-      break;
-    case 'IN_PROGRESS':
-      // Ride started
-      break;
-    case 'COMPLETED':
-      // Ride completed
-      break;
-    case 'CANCELLED':
-      // Ride cancelled
-      break;
-  }
-});
+curl -N -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:7860/api/v1/sse/rider/stream?event_types=ride_status_update&ride_id=<ride_id>"
 ```
 
 ## Complete Rider Flow
 
 1. **Authentication**: Rider signs up/logs in via REST API
-1. **Real-time Tracking**: Rider connects via WebSocket and joins ride room
-2. **Setup Profile**: Rider updates profile and saves favorite addresses
-3. **Request Ride**: Rider requests ride with pickup/destination
-5. **Monitor Progress**: Rider receives real-time status updates
+2. **Open SSE Stream**: Rider connects to `/api/v1/sse/rider/stream`
+3. **Setup Profile**: Rider updates profile and saves favorite addresses
+4. **Request Ride**: Rider requests ride with pickup/destination
+5. **Monitor Progress**: Rider receives real-time status updates via SSE
 6. **Complete Ride**: Rider rates driver after ride completion
 7. **View History**: Rider can view past rides and receipts
 
@@ -407,39 +892,36 @@ socket.on('ride_status_update', (update) => {
 
 ```javascript
 // 1. Calculate fare estimate
-const fareEstimate = await fetch('/api/v1/riders/places/fare', {
-  method: 'POST',
-  headers: { 'Authorization': `Bearer ${token}` },
-  body: JSON.stringify({
-    origin: pickupPlaceId,
-    destination: dropoffPlaceId,
-    vehicleType: 'SEDAN'
-  })
-});
-
-// 2. Request ride
-const rideRequest = await fetch('/api/v1/riders/ride', {
+const fareEstimate = await fetch('/api/v1/riders/place/calculate-fare', {
   method: 'POST',
   headers: { 'Authorization': `Bearer ${token}` },
   body: JSON.stringify({
     pickup: pickupPlaceId,
     destination: dropoffPlaceId,
-    vehicleType: 'CAR' 
+    stops: []
   })
 });
 
-// 3. Connect to WebSocket and join ride room you can connect earlier and then join when ride id is available 
-socket.emit('authenticate', { token });
-socket.on('authenticate_response', (auth) => {
-  if (auth.status === 'success') {
-    socket.emit('join_ride_room', { ride_id: rideData.id });
-  }
+// 2. Request ride
+const rideRequest = await fetch('/api/v1/riders/ride/request', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}` },
+  body: JSON.stringify({
+    pickup: pickupPlaceId,
+    destination: dropoffPlaceId,
+    vehicleType: 'CAR'
+  })
 });
 
-// 4. Monitor ride status
-socket.on('ride_status_update', (update) => {
-  updateRideUI(update.status, update.data);
+// 3. Open SSE stream for ride updates
+const streamResponse = await fetch(`/api/v1/sse/rider/stream?ride_id=${rideId}`, {
+  headers: { 'Authorization': `Bearer ${token}` }
 });
+const reader = streamResponse.body.getReader();
+
+// 4. Parse SSE events and acknowledge each one
+// (Use your preferred SSE parsing utility or library.)
+// When you receive an event with eventId, POST /api/v1/sse/rider/ack
 ```
 
 ## Error Handling
@@ -452,14 +934,7 @@ All API endpoints return standardized error responses:
 }
 ```
 
-WebSocket events return error responses:
-```json
-{
-  "status": "error",
-  "message": "Error description",
-  "detail": "Additional error details"
-}
-```
+SSE stream failures surface as connection errors (401/403) or disconnects. Acknowledgement failures return `404 Not Found` when the event no longer exists.
 
 Common errors:
 - `401 Unauthorized`: Invalid or expired token
@@ -481,7 +956,7 @@ Common errors:
 **Ride Requests**
 - Always calculate fare estimate before requesting ride
 - Save frequently used addresses for quick access
-- Monitor ride status via WebSocket for real-time updates
+- Monitor ride status via SSE for real-time updates
 - Rate drivers promptly after ride completion
 
 **Profile Management**
@@ -494,8 +969,7 @@ Common errors:
 - Check receipts after ride completion
 - Report payment issues immediately
 
-**WebSocket Usage**
-- Maintain persistent connection during active rides
-- Handle reconnection gracefully
-- Clean up event listeners when not needed</content>
-<parameter name="filePath">c:\Users\Mr Dashi\Downloads\door-delivery-backend\app\rider.md
+**SSE Usage**
+- Maintain a persistent stream during active rides
+- Acknowledge events promptly to avoid retries
+- Reconnect and resume stream on disconnects

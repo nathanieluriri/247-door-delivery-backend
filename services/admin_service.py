@@ -11,7 +11,7 @@ from repositories.admin_repo import (
     delete_admin,
 )
 from repositories.reset_token import create_reset_token, generate_otp, get_reset_token
-from schemas.admin_schema import AdminCreate, AdminUpdate, AdminOut,AdminBase,AdminRefresh
+from schemas.admin_schema import AdminCreate, AdminUpdate, AdminUpdatePassword, AdminOut,AdminBase,AdminRefresh
 from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, UserType
 from schemas.reset_token import ResetTokenBase, ResetTokenCreate
 from security.hash import check_password
@@ -55,8 +55,11 @@ async def authenticate_admin(admin_data:AdminBase )->AdminOut:
 
 async def refresh_admin_tokens_reduce_number_of_logins(admin_refresh_data:AdminRefresh,expired_access_token):
     refreshObj= await get_refresh_tokens(admin_refresh_data.refresh_token)
-    print("refreshObj","\n",refreshObj,"\n",refreshObj,"expired access token","\n",expired_access_token)
     if refreshObj:
+        if not ObjectId.is_valid(refreshObj.userId):
+            await delete_refresh_token(refreshToken=admin_refresh_data.refresh_token)
+            await delete_access_token(accessToken=expired_access_token)
+            raise HTTPException(status_code=401,detail="Invalid refresh token")
         if refreshObj.previousAccessToken==expired_access_token:
             admin = await get_admin(filter_dict={"_id":ObjectId(refreshObj.userId)})
             
@@ -69,8 +72,9 @@ async def refresh_admin_tokens_reduce_number_of_logins(admin_refresh_data:AdminR
                     await delete_access_token(accessToken=expired_access_token)
                     await delete_refresh_token(refreshToken=admin_refresh_data.refresh_token)
                     return admin
-     
-  
+        await delete_refresh_token(refreshToken=admin_refresh_data.refresh_token)
+        await delete_access_token(accessToken=expired_access_token)
+
     raise HTTPException(status_code=404,detail="Invalid refresh token ")  
         
 async def remove_admin(admin_id: str):
@@ -89,6 +93,7 @@ async def remove_admin(admin_id: str):
 
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Admin not found")
+    return True
 
 
 async def retrieve_admin_by_admin_id(id: str) -> AdminOut:
@@ -218,7 +223,7 @@ async def admin_reset_password_conclusion(
         )
 
     # 5️⃣ Update admin password
-    admin_update = AdminUpdate(
+    admin_update = AdminUpdatePassword(
         password=admin_details.password
     )
 

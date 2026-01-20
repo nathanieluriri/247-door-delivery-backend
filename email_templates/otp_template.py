@@ -1,6 +1,8 @@
 from string import Template
+from . import render_localized_template
 
-otp_template_string = Template("""
+otp_html_templates = {
+  "en": Template("""
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html lang="en">
 <head>
@@ -49,16 +51,38 @@ otp_template_string = Template("""
 </body>
 </html>
 """)
+}
 
-def generate_login_otp_email_from_template(otp_code: str, user_email: str) -> str:
+otp_text_templates = {
+  "en": Template("""Your one-time password (OTP) is:
+$otp_code
+
+This code is valid for 10 minutes. If you did not request this code, please ignore this email.
+
+This email was intended for $user_email.
+""")
+}
+
+def generate_login_otp_email_from_template(
+    otp_code: str,
+    user_email: str,
+    locale: str = "en",
+    return_format: str = "html",
+) -> str:
     """
     Generates an OTP email from a template, handling potential errors.
     """
-    try:
-        return otp_template_string.substitute(
-            otp_code=otp_code,
-            user_email=user_email
-        )
-    except KeyError as e:
-        print(f"Error: Missing template variable: {e}")
-        return None
+    values = {
+        "otp_code": otp_code,
+        "user_email": user_email,
+    }
+    html_body = render_localized_template(otp_html_templates, locale, values, html=True)
+    text_body = render_localized_template(otp_text_templates, locale, values, html=False)
+
+    if return_format == "html":
+        return html_body
+    if return_format == "text":
+        return text_body
+    if return_format == "both":
+        return {"html": html_body, "text": text_body}
+    raise ValueError("return_format must be 'html', 'text', or 'both'.")

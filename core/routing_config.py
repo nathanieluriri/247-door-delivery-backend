@@ -1,9 +1,10 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
-import googlemaps
 from datetime import datetime
 from dotenv import load_dotenv
+import logging
 import os
+import googlemaps
 class Location(BaseModel):
     latitude: float
     longitude: float
@@ -12,6 +13,7 @@ class Location(BaseModel):
 load_dotenv()
 
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+logger = logging.getLogger(__name__)
 # --- 1. Define Pydantic Models ---
 
 
@@ -36,7 +38,12 @@ class DeliveryRouteResponse(BaseModel):
 class MapsService:
     
     def __init__(self, api_key: str):
-        self.client = googlemaps.Client(key=api_key)
+        self.api_key = api_key
+        self.client = googlemaps.Client(key=api_key) if api_key else None
+
+    def _ensure_client(self):
+        if not self.client:
+            raise RuntimeError("GOOGLE_MAPS_API_KEY is not configured")
     def calculate_road_distance(
         self, 
         start_location: Location, 
@@ -47,6 +54,7 @@ class MapsService:
         using the Google Distance Matrix API.
         """
         try:
+            self._ensure_client()
             # Extract coordinates from Pydantic models
             origin = (start_location.latitude, start_location.longitude)
             destination = (stop_location.latitude, stop_location.longitude)
@@ -70,7 +78,7 @@ class MapsService:
             return None
 
         except Exception as e:
-            print(f"Maps API Error: {e}")
+            logger.exception("Maps API error while calculating distance: %s", e)
             return None
 
     def get_delivery_route(
@@ -82,6 +90,7 @@ class MapsService:
     ) -> Optional[DeliveryRouteResponse]:
         
         try:
+            self._ensure_client()
             # Request directions from Google
             directions_result = self.client.directions(
                 origin=origin,
@@ -130,7 +139,7 @@ class MapsService:
             )
 
         except Exception as e:
-    
+            logger.exception("Maps API error while fetching route: %s", e)
             return None
 
 

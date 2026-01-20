@@ -1,6 +1,8 @@
 from string import Template
+from . import render_localized_template
 # --- Invitation Email Template ---
-invitation_template_string = Template("""
+invitation_html_templates = {
+  "en": Template("""
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html lang="en">
 <head>
@@ -49,23 +51,50 @@ invitation_template_string = Template("""
 </body>
 </html>
 """)
+}
+
+invitation_text_templates = {
+  "en": Template("""You've been invited!
+
+$inviter_email has invited you to collaborate on the $project_name project.
+
+Accept the invitation here:
+$register_link
+
+This invitation will expire in 7 days.
+
+This invitation was intended for $invitee_email. If you were not expecting this invitation, you can ignore this email.
+""")
+}
 
 def generate_invitation_email_from_template(
     invitee_email: str,
     inviter_email: str,
     project_name: str,
-    register_link: str
+    register_link: str,
+    locale: str = "en",
+    return_format: str = "html",
 ) -> str:
     """
     Generates an invitation email from a template, handling potential errors.
     """
-    try:
-        return invitation_template_string.substitute(
-            invitee_email=invitee_email,
-            inviter_email=inviter_email,
-            project_name=project_name,
-            register_link=register_link
-        )
-    except KeyError as e:
-        print(f"Error: Missing template variable: {e}")
-        return None
+    values = {
+        "invitee_email": invitee_email,
+        "inviter_email": inviter_email,
+        "project_name": project_name,
+        "register_link": register_link,
+    }
+    html_body = render_localized_template(
+        invitation_html_templates, locale, values, html=True
+    )
+    text_body = render_localized_template(
+        invitation_text_templates, locale, values, html=False
+    )
+
+    if return_format == "html":
+        return html_body
+    if return_format == "text":
+        return text_body
+    if return_format == "both":
+        return {"html": html_body, "text": text_body}
+    raise ValueError("return_format must be 'html', 'text', or 'both'.")

@@ -1,8 +1,10 @@
 from string import Template
 import logging
+from . import render_localized_template
 
 # --- Revoke Invitation Email Template ---
-revoke_invitation_template_string = Template("""
+revoke_invitation_html_templates = {
+  "en": Template("""
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html lang="en">
 <head>
@@ -48,24 +50,48 @@ revoke_invitation_template_string = Template("""
 </body>
 </html>
 """)
+}
+
+revoke_invitation_text_templates = {
+  "en": Template("""Invitation revoked
+
+Your invitation to collaborate on the $project_name project has been revoked by $revoked_by_email.
+
+If you believe this was a mistake, please contact the person who invited you directly.
+
+This notification was intended for $revoked_user_email.
+""")
+}
 
 def generate_revoke_invitation_email_from_template(
     revoked_user_email: str,
     revoked_by_email: str,
-    project_name: str
+    project_name: str,
+    locale: str = "en",
+    return_format: str = "html",
 ) -> str:
     """
     Generates an invitation revocation email from a template.
     """
-    try:
-        return revoke_invitation_template_string.substitute(
-            revoked_user_email=revoked_user_email,
-            revoked_by_email=revoked_by_email,
-            project_name=project_name
-        )
-    except KeyError as e:
-        logging.error(f"Error: Missing template variable: {e}")
-        return None
+    values = {
+        "revoked_user_email": revoked_user_email,
+        "revoked_by_email": revoked_by_email,
+        "project_name": project_name,
+    }
+    html_body = render_localized_template(
+        revoke_invitation_html_templates, locale, values, html=True
+    )
+    text_body = render_localized_template(
+        revoke_invitation_text_templates, locale, values, html=False
+    )
+
+    if return_format == "html":
+        return html_body
+    if return_format == "text":
+        return text_body
+    if return_format == "both":
+        return {"html": html_body, "text": text_body}
+    raise ValueError("return_format must be 'html', 'text', or 'both'.")
 
 # --- Example Usage ---
 if __name__ == "__main__":

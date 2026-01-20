@@ -26,6 +26,7 @@ from schemas.rider_schema import (
     LoginType,
     RiderUpdatePassword,
 )
+from repositories.tokens_repo import delete_access_token, delete_refresh_tokens_by_previous_access_token
 from security.account_status_checks import check_rider_account_status
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
 from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details, nearby_drivers
@@ -78,28 +79,41 @@ async def auth_callback_rider(request: Request):
             
             access_token = items.access_token
             refresh_token = items.refresh_token
-            success_url = f"{SUCCESS_PAGE_URL}?access_token={access_token}&refresh_token={refresh_token}"
-            return RedirectResponse(
-            url=success_url,
-            status_code=status.HTTP_302_FOUND
-        )
+            query = urlencode(
+                {
+                    "status": "success",
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                }
+            )
+            success_url = f"{SUCCESS_PAGE_URL}?{query}"
+            response = RedirectResponse(
+                url=success_url,
+                status_code=status.HTTP_302_FOUND
+            )
+            return response
         access_token = data.access_token
         refresh_token = data.refresh_token
 
-         
-
-        success_url = f"{SUCCESS_PAGE_URL}?access_token={access_token}&refresh_token={refresh_token}"
-
-        return RedirectResponse(
+        query = urlencode(
+            {
+                "status": "success",
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+            }
+        )
+        success_url = f"{SUCCESS_PAGE_URL}?{query}"
+        response = RedirectResponse(
             url=success_url,
             status_code=status.HTTP_302_FOUND
         )
+        return response
     else:
         raise HTTPException(status_code=400,detail={"status": "failed", "message": "No user info found"})
 
 @router.get("/",response_model_exclude={"data": {"__all__": {"password"}}}, response_model=APIResponse[List[RiderOut]],response_model_exclude_none=True,dependencies=[Depends(verify_token)])
 async def list_riders(start:int= 0, stop:int=100):
-    items = await retrieve_riders(start=0,stop=100)
+    items = await retrieve_riders(start=start,stop=stop)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 @router.get("/profile", response_model_exclude={"data": {"password"}},response_model=APIResponse[RiderOut],dependencies=[Depends(verify_token_rider_role)],response_model_exclude_none=True)
@@ -138,6 +152,16 @@ async def delete_rider_account(token:accessTokenOut = Depends(verify_token_rider
     result = await remove_rider(user_id=token.userId)
     return result
 
+@router.post("/logout", dependencies=[Depends(verify_token_rider_role)])
+async def logout_rider(token: accessTokenOut = Depends(verify_token_rider_role)):
+    if not token.accesstoken:
+        raise HTTPException(status_code=400, detail="Invalid access token")
+    await delete_refresh_tokens_by_previous_access_token(accessToken=token.accesstoken)
+    deleted = await delete_access_token(accessToken=token.accesstoken)
+    if not deleted:
+        raise HTTPException(status_code=400, detail="Access token already invalidated")
+    return APIResponse(status_code=200, data=True, detail="Logged out successfully")
+
 @router.patch("/profile")
 async def update_rider_profile(rider_details:RiderUpdate,token:accessTokenOut = Depends(verify_token_rider_role)):
     rider = await update_rider_by_id(user_id=token.userId,user_data=rider_details)
@@ -164,7 +188,7 @@ async def rate_driver_after_ride(rating_data:RatingBase,token:accessTokenOut = D
 
     
     rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
-    rating = add_rating(rating_data=rider_rating)
+    rating = await add_rating(rating_data=rider_rating)
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Driver")
 
 
@@ -211,7 +235,7 @@ async def update_address_label(addressId:str,address_data:AddressUpdate,token:ac
     response_model=APIResponse[List[str]],
     summary="Get location suggestions (cached for 14 days)",
 )
-async def autocomplete(
+async def autocomplete_route(
     input: str = Query(..., description="User input text for autocomplete"),
     country: ALLOWED_COUNTRIES = Query(..., description="Choose one of them ")
 ):

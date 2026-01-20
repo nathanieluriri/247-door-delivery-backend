@@ -47,7 +47,7 @@ class AdminCreate(AdminBase):
     
 class AdminUpdate(BaseModel):
     # Add other fields here 
-    full_name:str
+    full_name: Optional[str] = None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
 class AdminUpdatePassword(BaseModel):
@@ -58,7 +58,7 @@ class AdminUpdatePassword(BaseModel):
     def obscure_password(self):
         if self.password:
             self.password=hash_password(self.password)
-            return self
+        return self
         
 class AdminUpdateAccountStatus(BaseModel):
     accountStatus:AccountStatus

@@ -25,12 +25,16 @@ class JWTPayload(BaseModel):
     exp: datetime
     iat: datetime
 
-SECRET_KEY = "super-secure-secret-key"
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secure-secret-key")
 ALGORITHM = "HS256"
 
 async def get_secret_dict()->dict:
-    result =await db.secret_keys.find_one({"_id":ObjectId(SECRETID)})
-    result.pop('_id')
+    if not SECRETID:
+        raise ValueError("SECRETID is not configured")
+    result = await db.secret_keys.find_one({"_id":ObjectId(SECRETID)})
+    if not result:
+        raise ValueError("Secret key set not found")
+    result.pop('_id', None)
     return result
 
 
@@ -40,6 +44,8 @@ async def get_secret_and_header():
     import random
     
     secrets = await get_secret_dict()
+    if not secrets:
+        raise ValueError("No secrets available for JWT signing")
     
     random_key = random.choice(list(secrets.keys()))
     random_secret = secrets[random_key]
@@ -51,6 +57,21 @@ async def get_secret_and_header():
     }
     
     return result
+
+
+async def _resolve_secret_for_token(token: str) -> str:
+    try:
+        header = jwt.get_unverified_header(token)
+    except Exception:
+        return SECRET_KEY
+    kid = header.get("kid") if isinstance(header, dict) else None
+    if not kid:
+        return SECRET_KEY
+    try:
+        secrets = await get_secret_dict()
+    except Exception:
+        return SECRET_KEY
+    return secrets.get(kid, SECRET_KEY)
 
 
 # ---------------------------
@@ -88,20 +109,26 @@ def create_jwt_token(
 
 
 async def create_jwt_member_token(token):
-    secrets = await get_secret_and_header()
-    SECRET_KEYS= secrets['SECRET_KEY']
-    headers= secrets['HEADERS']
-    
-    payload = {
-        'accessToken': token,
-        'role':'member',
-        'exp': datetime.now(timezone.utc) + datetime(minutes=15)
-    }
-    
-    
-    token = jwt.encode(payload, SECRET_KEYS[headers['kid']], algorithm='HS256', headers=headers)
+    try:
+        secrets = await get_secret_and_header()
+        secret_key = secrets["SECRET_KEY"][secrets["HEADERS"]["kid"]]
+        headers = secrets["HEADERS"]
+    except Exception:
+        secret_key = SECRET_KEY
+        headers = {"typ": "JWT"}
 
-    return token
+    payload = {
+        "accessToken": token,
+        "role": "member",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }
+
+    return jwt.encode(
+        payload,
+        secret_key,
+        algorithm="HS256",
+        headers=headers,
+    )
 
 async def create_jwt_admin_token(token: str,userId:str):
     payload = {
@@ -131,51 +158,46 @@ async def decode_jwt_token(token: str):
     """
 
     try:
-        # Decode and verify
-        decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        secret = await _resolve_secret_for_token(token)
+        decoded = jwt.decode(token, secret, algorithms=["HS256"])
         return decoded
 
     except jwt.ExpiredSignatureError:
-        print("Expired token")
         return None
 
     except jwt.InvalidSignatureError:
-        print("Invalid signature")
         return None
 
     except jwt.DecodeError:
-        print("Malformed token")
         return None
 
     except Exception as e:
-        print(f"Unexpected decode error: {e}")
         return None
 
 async def decode_jwt_token_without_expiration(token: str):
     try:
-        # Try decoding normally (with expiration check)
-        decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        secret = await _resolve_secret_for_token(token)
+        decoded = jwt.decode(token, secret, algorithms=["HS256"])
 
         return decoded
     
     except jwt.ExpiredSignatureError:
     
         try:
-            # Decode again but skip exp validation
             decoded = jwt.decode(
-                token, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False}
+                token,
+                secret,
+                algorithms=["HS256"],
+                options={"verify_exp": False},
             )
             return decoded
         except Exception as inner_e:
-            print(f"Failed to decode expired token: {inner_e}")
             return None
 
     except jwt.DecodeError:
-        print("Malformed token")
         return None
 
     except Exception as e:
-        print(f"Unexpected error decoding token: {e}")
         return None
 
 

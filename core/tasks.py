@@ -12,7 +12,6 @@ ASYNC_TASK_REGISTRY = {
     "ban_drivers":ban_drivers,
     "ban_riders":ban_riders,
     "delete_ride": remove_ride,
-    "add_stripe_event":add_stripe_event,
-    "update_ride_with_ride_id":update_ride_with_ride_id
+    "add_stripe_event":add_stripe_event
     
 }
