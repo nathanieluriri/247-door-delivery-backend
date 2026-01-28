@@ -9,10 +9,12 @@ from repositories.admin_repo import (
     get_admins,
     update_admin,
     delete_admin,
+    search_users_by_email_or_id,
 )
 from repositories.reset_token import create_reset_token, generate_otp, get_reset_token
 from schemas.admin_schema import AdminCreate, AdminUpdate, AdminUpdatePassword, AdminOut,AdminBase,AdminRefresh
 from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, UserType
+from schemas.user_schema import UserOut
 from schemas.reset_token import ResetTokenBase, ResetTokenCreate
 from security.hash import check_password
 from repositories.tokens_repo import add_refresh_tokens, add_admin_access_tokens, accessTokenCreate,accessTokenOut,refreshTokenCreate
@@ -150,6 +152,26 @@ async def update_admin_by_id(admin_id: str, admin_data: AdminUpdate,is_password_
     if is_password_getting_changed==True:
         result = celery_app.send_task("celery_worker.run_async_task",args=["delete_tokens",{"userId": admin_id} ])
     return result
+
+
+async def search_users_for_admin(query: str, limit: int = 10) -> List[UserOut]:
+    records = await search_users_by_email_or_id(query=query, limit=limit)
+    users: List[UserOut] = []
+    for record in records:
+        doc = record["doc"]
+        user_type = record["user_type"]
+        users.append(
+            UserOut(
+                id=str(doc.get("_id")),
+                email=doc.get("email"),
+                firstName=doc.get("firstName"),
+                lastName=doc.get("lastName"),
+                fullName=doc.get("full_name"),
+                accountStatus=doc.get("accountStatus"),
+                userType=user_type,
+            )
+        )
+    return users
 
 
 

@@ -8,7 +8,7 @@
 
 from bson import ObjectId
 from fastapi import HTTPException
-from typing import List
+from typing import List, Optional
 
 from repositories.rating import (
     create_rating,
@@ -21,11 +21,11 @@ from repositories.rating import (
 from services.ride_service import (
     retrieve_ride_by_ride_id
 )
-from schemas.rating import RatingCreate, RatingUpdate, RatingOut
+from schemas.rating import RatingCreate, RatingSummary, RatingUpdate, RatingOut
 from schemas.imports import RideStatus
 
 
-async def add_rating(rating_data: RatingCreate,driverId:str=None,riderId:str=None) -> RatingOut:
+async def add_rating(rating_data: RatingCreate, driverId: Optional[str] = None, riderId: Optional[str] = None) -> RatingOut:
     """adds an entry of RatingCreate to the database and returns an object
 
     Returns:
@@ -86,7 +86,7 @@ async def retrieve_rating_by_rating_id(id: str) -> RatingOut:
     return result
 
 
-async def retrieve_rating_by_user_id(user_id: str) -> RatingOut:
+async def retrieve_rating_by_user_id(user_id: str) -> RatingSummary:
     """Retrieves rating object based specific Id 
 
     Raises:

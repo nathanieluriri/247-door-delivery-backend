@@ -1,14 +1,12 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from middlewares.request_timing_middleware import RequestTimingMiddleware
 from limits.strategies import FixedWindowRateLimiter
 from datetime import datetime,timedelta
 from limits.storage import RedisStorage
 import math
 from schemas.response_schema import APIResponse
-from repositories.tokens_repo import get_access_tokens_no_date_check
 from limits import parse
 import time   
 import os
@@ -25,7 +23,7 @@ from security.encrypting_jwt import decode_jwt_token
 from redis_om import Migrator
 from starlette.concurrency import run_in_threadpool
 from services.sse_service import publish_ride_request
-
+from middlewares.rate_limiting_middleware import RateLimitingMiddleware
 
 MONGO_URI = os.getenv("MONGO_URL")
 REDIS_URI = f"redis://{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/0"
@@ -83,26 +81,6 @@ async def lifespan(app:FastAPI):
         scheduler.shutdown()
     
 
-class RequestTimingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        # Record the start time before processing the request
-        start_time = time.time()
-        
-        # Process the request and get the response
-        response = await call_next(request)
-        
-        # Calculate the time taken to process the request
-        process_time = time.time() - start_time
-        
-        # You can log the time or set it in the response headers
-        response.headers['X-Process-Time'] = str(process_time)
-        
-        # Optionally, print it for logging purposes
-        print(f"Request to {request.url} took {process_time:.6f} seconds")
-        
-        return response
-    
-    
     
     
 # Create the FastAPI app
@@ -115,6 +93,7 @@ app = FastAPI(
 app.add_middleware(RequestTimingMiddleware)
 
 app.add_middleware(SessionMiddleware, secret_key="not-some-random-string")
+
 redis_url = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL") \
     or f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/0"
 
@@ -132,85 +111,10 @@ RATE_LIMITS = {
     "admin": parse("240/minute"),
 }
 
-async def get_user_type(request: Request) -> tuple[str, str]:
-    auth_header = request.headers.get("Authorization")
+app.state.limiter = limiter
+app.state.rate_limits = RATE_LIMITS
 
-    # Anonymous fallback
-    if not auth_header or not auth_header.startswith("Bearer "):
-        ip = request.headers.get("X-Forwarded-For", request.client.host)
-        return ip, "anonymous"
 
-    token = auth_header.split(" ", 1)[1]
-
-    try:
-        decoded = await decode_jwt_token(token=token)
-
-        # 🔑 normalize admin vs member JWTs
-        access_token_value = (
-            decoded.get("access_token")
-            or decoded.get("accessToken")
-        )
-
-        if not access_token_value:
-            raise ValueError("access token missing in JWT")
-
-        access_token = await get_access_tokens(
-            accessToken=access_token_value
-        )
-
-        return access_token.userId, access_token.role
-
-    except Exception as e:
-        ip = request.headers.get("X-Forwarded-For", request.client.host)
-        return ip, "anonymous" 
-
- 
-    return user_id, user_type if user_type in RATE_LIMITS else "annonymous"   
-class RateLimitingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        
-        user_id, user_type = await get_user_type(request)
-        rate_limit_rule = RATE_LIMITS[user_type]
-
-        # hit() → True if still under limit
-        allowed = limiter.hit(rate_limit_rule, user_id)
-
-        # Get current window stats (reset_time, remaining)
-        reset_time, remaining = limiter.get_window_stats(rate_limit_rule, user_id)
-        seconds_until_reset = max(math.ceil(reset_time - time.time()), 0)
-
-        if not allowed:
-            return JSONResponse(
-                status_code=429,
-                headers={
-                    "X-User-Type": user_type,
-                    "X-User-Id":user_id,
-                    "X-RateLimit-Limit": str(rate_limit_rule.amount),
-                    "X-RateLimit-Remaining": str(max(remaining, 0)),
-                    "X-RateLimit-Reset": str(seconds_until_reset),
-                    "Retry-After": str(seconds_until_reset),
-                },
-                content=APIResponse(
-                    status_code=429,
-                    data={
-                        "retry_after_seconds": seconds_until_reset,
-                        "user_type": user_type,
-                    },
-                    detail="Too Many Requests",
-                ).dict(),
-            )
-
-        # Normal flow
-        response = await call_next(request)
-
-        # Add rate-limit headers for successful requests too
-        response.headers["X-User-Id"]=user_id
-        response.headers["X-User-Type"] = user_type
-        response.headers["X-RateLimit-Limit"] = str(rate_limit_rule.amount)
-        response.headers["X-RateLimit-Remaining"] = str(max(remaining, 0))
-        response.headers["X-RateLimit-Reset"] = str(seconds_until_reset)
-
-        return response
 
 # Add the middleware to the app
 # ||||||||||||||||||||||||||||||||||||
@@ -262,7 +166,7 @@ redis_client = redis.Redis.from_url(REDIS_URI, socket_connect_timeout=2)
 
 # Health check route
 @app.get("/health",tags=["Health"])
-async def health_check():
+async def health_check_regular():
     overall_status = "healthy"
     services = {}
 
@@ -577,7 +481,7 @@ from api.v1.payment import router as v1_payment_router
 from api.v1.sse import router as v1_sse_router
 
 
-app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=False)
+app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=True)
 app.include_router(v1_driver_router, prefix='/api/v1')
 app.include_router(v1_rider_route_router, prefix='/api/v1')
 app.include_router(v1_payment_router, prefix='/api/v1',include_in_schema=False)

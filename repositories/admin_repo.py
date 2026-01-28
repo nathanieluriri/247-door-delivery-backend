@@ -1,5 +1,6 @@
 
 from pymongo import ReturnDocument
+from bson import ObjectId
 from core.database import db
 from fastapi import HTTPException,status
 from typing import List,Optional
@@ -118,3 +119,39 @@ async def delete_admin(filter_dict: dict):
             detail="Admin not found."
         )
     return result
+
+
+async def search_users_by_email_or_id(query: str, limit: int = 10) -> List[dict]:
+    if not query:
+        return []
+
+    limit = max(1, min(limit, 50))
+    regex_filter = {"$regex": query, "$options": "i"}
+    results: List[dict] = []
+    seen_ids: set[str] = set()
+
+    async def _append_unique(doc: dict, user_type: str) -> None:
+        doc_id = str(doc.get("_id"))
+        if doc_id in seen_ids:
+            return
+        seen_ids.add(doc_id)
+        results.append({"user_type": user_type, "doc": doc})
+
+    driver_cursor = db.drivers.find({"email": regex_filter}).limit(limit)
+    async for doc in driver_cursor:
+        await _append_unique(doc, "driver")
+
+    rider_cursor = db.Riders.find({"email": regex_filter}).limit(limit)
+    async for doc in rider_cursor:
+        await _append_unique(doc, "rider")
+
+    if ObjectId.is_valid(query):
+        object_id = ObjectId(query)
+        driver_doc = await db.drivers.find_one({"_id": object_id})
+        if driver_doc:
+            await _append_unique(driver_doc, "driver")
+        rider_doc = await db.Riders.find_one({"_id": object_id})
+        if rider_doc:
+            await _append_unique(rider_doc, "rider")
+
+    return results[:limit]

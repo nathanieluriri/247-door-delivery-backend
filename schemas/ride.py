@@ -88,3 +88,9 @@ class RideOut(RideBase):
         json_encoders ={
             ObjectId: str  # automatically converts ObjectId → str
         }
+
+
+class RideShareLinkOut(BaseModel):
+    shareId: str
+    shareLink: str
+    rideId: str

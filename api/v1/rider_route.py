@@ -1,9 +1,7 @@
-
 import os
 from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
 from typing import List, Literal, Union
-
 from fastapi.responses import RedirectResponse
 from core.countries import ALLOWED_COUNTRIES
 from core.payments import PaymentService, get_payment_service
@@ -14,7 +12,7 @@ from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, Re
 from schemas.place import FareBetweenPlacesCalculationRequest, FareBetweenPlacesCalculationResponse, Location, PlaceBase
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
-from schemas.ride import RideBase, RideCreate, RideOut, RideUpdate
+from schemas.ride import RideBase, RideCreate, RideOut, RideShareLinkOut, RideUpdate
 from schemas.tokens_schema import accessTokenOut
 from core.routing_config import maps
 from schemas.rider_schema import (
@@ -31,7 +29,7 @@ from security.account_status_checks import check_rider_account_status
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
 from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details, nearby_drivers
 from services.rating_service import add_rating, retrieve_rating_by_user_id
-from services.ride_service import add_ride, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, update_ride_by_id
+from services.ride_service import add_ride, generate_public_ride_sharing_link_for_rider, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, retrieve_shared_ride_by_share_id, update_ride_by_id
 from services.rider_service import (
     add_rider,
     remove_rider,
@@ -56,6 +54,8 @@ ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
 # --- Step 1: Redirect user to Google login ---
 @router.get("/google/auth")
 async def login_with_google_account(request: Request):
+    if not oauth or not oauth.google:
+        raise HTTPException(status_code=500, detail="OAuth configuration not initialized")
     redirect_uri = request.url_for("auth_callback_rider")
     print("REDIRECT URI:", redirect_uri)
  
@@ -65,6 +65,8 @@ async def login_with_google_account(request: Request):
 # --- Step 2: Handle callback from Google ---
 @router.get("/auth/callback")
 async def auth_callback_rider(request: Request):
+    if not oauth or not oauth.google:
+        raise HTTPException(status_code=500, detail="OAuth configuration not initialized")
     token = await oauth.google.authorize_access_token(request)
     user_info = token.get('userinfo')
 
@@ -185,8 +187,6 @@ async def view_driver_rating(driverId:str):
 @router.post("/rate/driver", response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)])
 async def rate_driver_after_ride(rating_data:RatingBase,token:accessTokenOut = Depends(verify_token_rider_role)):
     
-
-    
     rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
     rating = await add_rating(rating_data=rider_rating)
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Driver")
@@ -279,17 +279,24 @@ async def calculate_fare_price(data:FareBetweenPlacesCalculationRequest):
     pick_up = await get_place_details(place_id=data.pickup)
     drop_off = await get_place_details(place_id=data.destination)
    
-    origin = (pick_up.data["lat"],pick_up.data["lng"])
-    destination = (drop_off.data["lat"],drop_off.data["lng"])
-    stops=None
+    if not pick_up or not pick_up.data:
+        raise HTTPException(status_code=400, detail="Invalid pickup location")
+    if not drop_off or not drop_off.data:
+        raise HTTPException(status_code=400, detail="Invalid destination location")
+    
+    origin = (pick_up.data.get("lat"),pick_up.data.get("lng"))
+    destination = (drop_off.data.get("lat"),drop_off.data.get("lng"))
+    stops: list = []
     if data.stops:
-        stops=[]
-        index=0
         for stop in data.stops:
             _place_details =await get_place_details(place_id=stop)
-            stops.append((_place_details.data['lat'],_place_details.data['lng']))
+            if _place_details.data is not None:
+                stops.append((_place_details.data['lat'],_place_details.data['lng']))
     
-    map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)
+    map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops or [])
+    
+    if not map:
+        raise HTTPException(status_code=400, detail="Unable to calculate route")
     
     bike_calculation = calculate_fare_using_vehicle_config_and_distance(distance=map.totalDistanceMeters,time=map.totalDurationSeconds,vehicle=Vehicle.MOTOR_BIKE,)
     car_calculation = calculate_fare_using_vehicle_config_and_distance(distance=map.totalDistanceMeters,time=map.totalDurationSeconds,vehicle=Vehicle.CAR,)
@@ -313,22 +320,29 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
     pick_up = await get_place_details(place_id=data.pickup)
     drop_off = await get_place_details(place_id=data.destination)
    
+    if not pick_up or not pick_up.data:
+        raise HTTPException(status_code=400, detail="Invalid pickup location")
+    if not drop_off or not drop_off.data:
+        raise HTTPException(status_code=400, detail="Invalid destination location")
+    
     origin = (pick_up.data["lat"],pick_up.data["lng"])
     
     available_drivers = await nearby_drivers(pickup_lat=pick_up.data["lat"],pickup_lon=pick_up.data["lng"])
     
-    if (available_drivers>0 and data.pickupSchedule==0) or ( data.pickupSchedule>=240):
+    pickup_schedule = data.pickupSchedule or 0
+    if (available_drivers>0 and pickup_schedule==0) or (pickup_schedule and pickup_schedule>=240):
         destination = (drop_off.data["lat"],drop_off.data["lng"])
-        stops=None
+        stops=[]
         if data.stops:
-            stops=[]
             index=0
             for stop in data.stops:
-                _place_details =await get_place_details(place_id=stop)
-                stops.append((_place_details.data['lat'],_place_details.data['lng']))
+                _place_details = await get_place_details(place_id=stop)
+                if _place_details and _place_details.data:
+                    stops.append((_place_details.data['lat'], _place_details.data['lng']))
         
         map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)
-        
+        if not map:
+            raise HTTPException(status_code=400, detail="Unable to calculate route")
         
         vehicle = Vehicle[data.vehicleType.value]
         price = calculate_fare_using_vehicle_config_and_distance(
@@ -359,10 +373,16 @@ async def view_ride_details(rideId:str,token:accessTokenOut = Depends(verify_tok
     return APIResponse(data =ride ,status_code=200,detail="Successfully Retrieved ride") 
 
 
-@router.get("/ride/{rideId}/share",  response_model_exclude_none=True,dependencies=[Depends(verify_token_rider_role)],response_model=APIResponse[RideOut])
-async def generate_public_ride_sharing_link(rideId:str):
-    # TODO: IMPLEMENT THIS ROUTE FUNCTION
-    pass
+@router.get("/ride/{rideId}/share", response_model_exclude_none=True, dependencies=[Depends(verify_token_rider_role)], response_model=APIResponse[RideShareLinkOut])
+async def generate_public_ride_sharing_link(rideId: str, token: accessTokenOut = Depends(verify_token_rider_role)):
+    payload = await generate_public_ride_sharing_link_for_rider(ride_id=rideId, user_id=token.userId)
+    return APIResponse(status_code=200, data=payload, detail="Share link generated")
+
+
+@router.get("/ride/share/{shareId}", response_model_exclude_none=True, response_model=APIResponse[RideOut])
+async def get_shared_ride(shareId: str):
+    ride = await retrieve_shared_ride_by_share_id(share_id=shareId)
+    return APIResponse(status_code=200, data=ride, detail="Shared ride retrieved")
 
 
   
@@ -375,7 +395,7 @@ async def generate_public_ride_sharing_link(rideId:str):
 
 @router.patch("/password-reset",dependencies=[Depends(verify_token_rider_role),Depends(check_rider_account_status)])
 async def update_rider_password_while_logged_in(rider_details:RiderUpdatePassword,token:accessTokenOut = Depends(verify_token_rider_role)):
-    driver =  await update_rider_by_id(driver_id=token.userId,rider_details=rider_details,is_password_getting_changed=True)
+    driver =  await update_rider_by_id(user_id=token.userId,user_data=rider_details,is_password_getting_changed=True)
     return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
 
 

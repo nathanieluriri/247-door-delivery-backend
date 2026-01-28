@@ -3,6 +3,7 @@ from pymongo import ReturnDocument
 from core.database import db
 from fastapi import HTTPException,status
 from typing import List,Optional
+from schemas.imports import AccountStatus
 from schemas.rider_schema import RiderUpdate, RiderCreate, RiderOut
 
 async def create_rider(Rider_data: RiderCreate) -> RiderOut:
@@ -100,3 +101,17 @@ async def delete_rider(filter_dict: dict):
             detail="Rider not found."
         )
     return result
+
+
+async def search_riders(
+    email_address: Optional[str] = None,
+    status: Optional[AccountStatus] = None,
+    start: int = 0,
+    stop: int = 100,
+) -> List[RiderOut]:
+    filter_dict: dict = {}
+    if email_address:
+        filter_dict["email"] = {"$regex": email_address, "$options": "i"}
+    if status:
+        filter_dict["accountStatus"] = status
+    return await get_riders(filter_dict=filter_dict, start=start, stop=stop)

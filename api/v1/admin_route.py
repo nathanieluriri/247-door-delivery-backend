@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends,Body
 from typing import List,Annotated
 from core.routing_config import maps
@@ -11,6 +10,7 @@ from schemas.response_schema import APIResponse
 from schemas.ride import RideBase, RideCreate, RideOut, RideUpdate
 from schemas.rider_schema import RiderOut, RiderUpdateAccountStatus
 from schemas.tokens_schema import accessTokenOut
+from schemas.user_schema import UserOut
 from celery_worker import celery_app
 from schemas.admin_schema import (
     AdminCreate,
@@ -32,6 +32,7 @@ from services.admin_service import (
     retrieve_admin_by_admin_id,
     update_admin_by_id,
     refresh_admin_tokens_reduce_number_of_logins,
+    search_users_for_admin,
 
 )
 from services.driver_service import (
@@ -46,6 +47,7 @@ from services.rider_service import (
     ban_riders,
     update_rider_by_id,
     RiderUpdate,
+    retrieve_riders_by_email_and_status,
     
 )
 from schemas.imports import *
@@ -248,6 +250,22 @@ async def update_driver_profile(admin_details:AdminUpdate,token:dict = Depends(v
     admin = await update_admin_by_id(admin_id=admin_id,admin_data=admin_details,)
     return APIResponse(data=admin,status_code=200,detail="Succesfully updated profile")
 
+
+@router.get(
+    "/users/search",
+    response_model=APIResponse[List[UserOut]],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+)
+async def search_users_for_admin_autocomplete(
+    q: str = Query(..., min_length=1, description="Email or user id to search"),
+    limit: int = Query(default=10, ge=1, le=50, description="Max results to return"),
+):
+    """
+    Search riders and drivers by email (autocomplete) or exact user id.
+    """
+    results = await search_users_for_admin(query=q, limit=limit)
+    return APIResponse(status_code=200, data=results, detail="Users retrieved")
+
 # ---------------------------------------------------
 # --------------- DRIVER MANAGEMENT -----------------
 # ---------------------------------------------------
@@ -298,6 +316,38 @@ async def list_riders(start:int= 0, stop:int=100,token:accessTokenOut = Depends(
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
+@router.get(
+    "/riders/search",
+    response_model=APIResponse[List[UserOut]],
+    response_model_exclude_none=True,
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+)
+async def search_riders_by_email_and_status(
+    email_address: str | None = Query(default=None, description="Filter by rider email (partial match)"),
+    status: AccountStatus | None = Query(default=None, description="Filter by account status"),
+    start: int = Query(default=0, ge=0),
+    stop: int = Query(default=100, ge=1),
+):
+    riders = await retrieve_riders_by_email_and_status(
+        email_address=email_address,
+        status=status,
+        start=start,
+        stop=stop,
+    )
+    results = [
+        UserOut(
+            id=rider.id,
+            email=rider.email,
+            firstName=rider.firstName,
+            lastName=rider.lastName,
+            accountStatus=rider.accountStatus,
+            userType=UserType.rider,
+        )
+        for rider in riders
+    ]
+    return APIResponse(status_code=200, data=results, detail="Riders retrieved")
+
+
 
 @router.get("/rider/{riderId}", response_model_exclude={"data": {"password"}}, response_model=APIResponse[RiderOut] ,    dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does),Depends(check_admin_account_status_and_permissions)],response_model_exclude_none=True)
 async def get_a_particular_riders_details(riderId:str,token:accessTokenOut = Depends(verify_admin_token)):
@@ -324,7 +374,6 @@ async def ban_a_rider_from_using_the_app(riderId:str,token:accessTokenOut = Depe
 # --------------------------------------------------
 
 
-
 @router.post("/ride/{userId}",dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does),Depends(check_admin_account_status_and_permissions)],response_model_exclude_none=True, response_model_exclude={"data": {"password"}},response_model=APIResponse[RideOut])
 async def create_a_ride_for_user(
     ride_data:RideBase,
@@ -333,7 +382,8 @@ async def create_a_ride_for_user(
 ):
     pick_up = await get_place_details(place_id=ride_data.pickup)
     drop_off = await get_place_details(place_id=ride_data.destination)
-   
+    if pick_up.data==None or drop_off.data==None:
+        raise HTTPException(status_code=500, detail="pickup or dropoff details fetching failed")
     origin = (pick_up.data["lat"],pick_up.data["lng"])
     destination = (drop_off.data["lat"],drop_off.data["lng"])
     stops=None
@@ -342,6 +392,8 @@ async def create_a_ride_for_user(
         index=0
         for stop in ride_data.stops:
             _place_details =await get_place_details(place_id=stop)
+            if _place_details.data==None:
+                raise HTTPException(status_code=500, detail="pickup or dropoff details fetching failed")
             stops.append((_place_details.data['lat'],_place_details.data['lng']))
     
     map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)

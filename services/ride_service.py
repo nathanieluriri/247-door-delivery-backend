@@ -6,6 +6,9 @@
 # 
 # ============================================================================
 
+import os
+import time
+import uuid
 from decimal import Decimal
 from core.scheduler import scheduler
 from fastapi import status
@@ -17,6 +20,7 @@ from datetime import timezone
 utc = timezone.utc
 from core.payments import PaymentService, get_payment_service
 from services.sse_service import publish_ride_status_update, publish_ride_request
+from core.redis_cache import async_redis
 from repositories.ride import (
     check_if_user_has_an_existing_active_ride,
     create_ride,
@@ -26,23 +30,25 @@ from repositories.ride import (
     delete_ride,
 )
 from schemas.imports import ALLOWED_RIDE_STATUS_TRANSITIONS, RIDE_REFUND_RULES, RideStatus
-from schemas.ride import RideCreate, RideUpdate, RideOut
+from schemas.ride import RideCreate, RideUpdate, RideOut, RideShareLinkOut
 
 
+FRONTEND_SHARE_RIDE_URL = os.getenv("FRONTEND_SHARE_RIDE_URL", "http://localhost:8080/share/ride")
 
 
 async def check_if_state_is_still_pending_payment_and_delete_ride_if_it_is_still_pending_payment(ride_id:str):
     from celery_worker import celery_app
     print("Currently running the scheduled task check if state still pending payment")
-    import time
     filter_dict = {"_id": ObjectId(ride_id)}
     ride =await get_ride(filter_dict=filter_dict)
    
     if ride:
         if (ride.rideStatus==RideStatus.pendingPayment) and (ride.paymentStatus==False):
+            if ride.last_updated is None:
+                return
             if time.time() - ride.last_updated >= 200:
               
-                result = celery_app.send_task(
+                celery_app.send_task(
                 "celery_worker.run_async_task",
                 args=[
                     "delete_ride",       # function path
@@ -58,15 +64,16 @@ async def check_if_state_is_still_pending_payment_and_delete_ride_if_it_is_still
                 pass
         
 async def check_if_state_is_still_finding_driver_and_6_mins_have_passed_if_so_delete_the_ride(ride_id:str):
-    import time
     from celery_worker import celery_app
     filter_dict = {"_id": ObjectId(ride_id)}
     print("Currently running the scheduled task check if state still finding driver")
     ride =await get_ride(filter_dict=filter_dict)
     if ride:
         if (ride.rideStatus==RideStatus.findingDriver):
+            if ride.last_updated is None:
+                return
             if time.time() - ride.last_updated >= 300:
-                result = celery_app.send_task(
+                celery_app.send_task(
                 "celery_worker.run_async_task",
                 args=[
                     "delete_ride",       # function path
@@ -92,6 +99,8 @@ async def add_ride(
     
     await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
     ride = await create_ride(ride_data)
+    if not ride.id:
+        raise HTTPException(status_code=500, detail="Ride id missing after creation")
     payment = await payment_service.create_payment_link(ride_id=ride.id)
     ride = await update_ride(
         {"_id": ObjectId(ride.id)},
@@ -125,7 +134,7 @@ async def add_ride(
  
 async def add_ride_admin_func(
     ride_data: RideCreate,
-    payment_service: PaymentService = Depends(get_payment_service)
+    _payment_service: PaymentService = Depends(get_payment_service)
 ) -> RideOut:
     """Adds an entry of RideCreate to the database and returns an object."""
     
@@ -153,7 +162,7 @@ async def remove_ride(ride_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ride not found")
 
-    else: return True
+    return True
     
 async def retrieve_ride_by_ride_id(id: str) -> RideOut:
     """Retrieves ride object based specific Id 
@@ -178,7 +187,7 @@ async def retrieve_ride_by_ride_id(id: str) -> RideOut:
 
 
 
-async def retrieve_rides_by_user_id(user_id: str) -> RideOut:
+async def retrieve_rides_by_user_id(user_id: str) -> List[RideOut]:
     """Retrieves ride object based specific Id 
 
     Raises:
@@ -200,7 +209,7 @@ async def retrieve_rides_by_user_id(user_id: str) -> RideOut:
     return result
 
 
-async def retrieve_rides_by_driver_id(driver_id: str) -> RideOut:
+async def retrieve_rides_by_driver_id(driver_id: str) -> List[RideOut]:
     """Retrieves ride object based specific Id 
 
     Raises:
@@ -246,6 +255,55 @@ async def retrieve_rides_by_user_id_and_ride_id(user_id: str,ride_id:str) -> Rid
         raise HTTPException(status_code=404, detail="Ride not found")
 
     return result
+
+
+async def generate_public_ride_sharing_link_for_rider(ride_id: str, user_id: str) -> RideShareLinkOut:
+    ride = await retrieve_rides_by_user_id_and_ride_id(user_id=user_id, ride_id=ride_id)
+    if (ride == None) or (ride.id == None):
+        raise HTTPException(status_code=500,detail="Ride doesn't exist")
+    ride_id = ride.id
+    ride_key = f"ride_share:by_ride:{ride_id}"
+    share_id = await async_redis.get(ride_key)
+    if share_id:
+        share_key = f"ride_share:link:{share_id}"
+        if not await async_redis.exists(share_key):
+            await async_redis.hset(
+                share_key,
+                mapping={
+                    "ride_id": ride_id,
+                    "created_by": user_id,
+                    "role": "rider",
+                    "created_at": str(int(time.time())),
+                },
+            )
+    else:
+        share_id = uuid.uuid4().hex
+        share_key = f"ride_share:link:{share_id}"
+        created_at = str(int(time.time()))
+        pipe = async_redis.pipeline()
+        pipe.set(ride_key, share_id)
+        pipe.hset(
+            share_key,
+            mapping={
+                "ride_id": ride_id,
+                "created_by": user_id,
+                "role": "rider",
+                "created_at": created_at,
+            },
+        )
+        await pipe.execute()
+
+    share_link = f"{FRONTEND_SHARE_RIDE_URL}?share_id={share_id}"
+    return RideShareLinkOut(shareId=share_id, shareLink=share_link, rideId=ride_id)
+
+
+async def retrieve_shared_ride_by_share_id(share_id: str) -> RideOut:
+    share_key = f"ride_share:link:{share_id}"
+    payload = await async_redis.hgetall(share_key)
+    ride_id = payload.get("ride_id")
+    if not ride_id:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    return await retrieve_ride_by_ride_id(id=ride_id)
 
 
 async def retrieve_rides(start=0,stop=100) -> List[RideOut]:
@@ -322,28 +380,29 @@ async def update_ride_by_id(
 
         if refund_percentage is not None:
             try:
-                payment_service = get_payment_service()
-                if ride.price is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Ride price is missing for refund",
-                    )
-                unit_amount = int(ride.price / 10)
+                if ride.paymentStatus:
+                    payment_service = get_payment_service()
+                    if ride.price is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Ride price is missing for refund",
+                        )
 
-                refund_amount = int(
-                    Decimal(unit_amount) * Decimal(str(refund_percentage))
-                )
-
-                if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Missing payment intent for refund",
+                    unit_amount = int(ride.price / 10)
+                    refund_amount = int(
+                        Decimal(unit_amount) * Decimal(str(refund_percentage))
                     )
 
-                await payment_service.refund(
-                    payment_intent_id=ride.checkoutSessionObject.payment_intent,
-                    amount=refund_amount,
-                )
+                    if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Missing payment intent for refund",
+                        )
+
+                    await payment_service.refund(
+                        payment_intent_id=ride.checkoutSessionObject.payment_intent,
+                        amount=refund_amount,
+                    )
             except HTTPException:
                 raise
             except Exception as e:
@@ -402,17 +461,18 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     # CANCEL OF RIDE CASES
     if (ride.rideStatus==RideStatus.findingDriver or ride.rideStatus==RideStatus.pendingPayment) and (ride_data.rideStatus==RideStatus.canceled):
         try:
-            payment_service = get_payment_service()
-            if ride.price is None:
-                raise HTTPException(status_code=400, detail="Ride price is missing for refund")
-            unit_amount = int(ride.price / 10)
-            if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
-                raise HTTPException(status_code=400, detail="Missing payment intent for refund")
-            refund_amount = int(Decimal(unit_amount) * Decimal("0.95"))
-            await payment_service.refund(
-                payment_intent_id=ride.checkoutSessionObject.payment_intent,
-                amount=refund_amount,
-            )
+            if ride.paymentStatus:
+                payment_service = get_payment_service()
+                if ride.price is None:
+                    raise HTTPException(status_code=400, detail="Ride price is missing for refund")
+                unit_amount = int(ride.price / 10)
+                if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
+                    raise HTTPException(status_code=400, detail="Missing payment intent for refund")
+                refund_amount = int(Decimal(unit_amount) * Decimal("0.95"))
+                await payment_service.refund(
+                    payment_intent_id=ride.checkoutSessionObject.payment_intent,
+                    amount=refund_amount,
+                )
         except HTTPException:
             raise
         except Exception as e:
@@ -479,5 +539,3 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
     
     return result.model_dump()
-
-

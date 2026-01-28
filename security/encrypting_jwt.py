@@ -1,3 +1,4 @@
+from typing import Optional
 import jwt
  
 from datetime import timedelta, timezone,datetime
@@ -143,7 +144,7 @@ async def create_jwt_admin_token(token: str,userId:str):
 
 
 
-async def decode_jwt_token(token: str):
+async def decode_jwt_token(token: str)->Optional[dict]:
     """
     Decodes and verifies a JWT token.
 
@@ -175,8 +176,8 @@ async def decode_jwt_token(token: str):
         return None
 
 async def decode_jwt_token_without_expiration(token: str):
+    secret = await _resolve_secret_for_token(token)
     try:
-        secret = await _resolve_secret_for_token(token)
         decoded = jwt.decode(token, secret, algorithms=["HS256"])
 
         return decoded

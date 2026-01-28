@@ -11,7 +11,7 @@ from services.rider_service import retrieve_rider_by_rider_id
 
 token_auth_scheme = HTTPBearer()
 async def verify_token(token: str = Depends(token_auth_scheme))->JWTPayload:
-    decoded_token = await decode_jwt_token(token=token.credentials)
+    decoded_token = await decode_jwt_token(token=token.credentials) # type: ignore
     if not decoded_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -31,7 +31,7 @@ async def verify_token(token: str = Depends(token_auth_scheme))->JWTPayload:
         detail="Invalid token"
     )
 async def verify_token_to_refresh(token: str = Depends(token_auth_scheme))->accessTokenOut:
-    tokens = await decode_jwt_token_without_expiration(token=token.credentials)
+    tokens = await decode_jwt_token_without_expiration(token=token.credentials) # type: ignore
     if not tokens:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -54,7 +54,7 @@ async def verify_token_to_refresh(token: str = Depends(token_auth_scheme))->acce
     
 
 async def verify_token_rider_role(token: str = Depends(token_auth_scheme))->accessTokenOut:
-    decoded_token = await decode_jwt_token(token=token.credentials)
+    decoded_token = await decode_jwt_token(token=token.credentials) # type: ignore
     if not decoded_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -82,7 +82,7 @@ async def verify_token_rider_role(token: str = Depends(token_auth_scheme))->acce
  
             
 async def verify_token_driver_role(token: str = Depends(token_auth_scheme))->accessTokenOut:
-    decoded_token = await decode_jwt_token(token=token.credentials)
+    decoded_token = await decode_jwt_token(token=token.credentials) # type: ignore
     if not decoded_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -109,9 +109,8 @@ async def verify_token_driver_role(token: str = Depends(token_auth_scheme))->acc
     return result
 async def verify_admin_token(token: str = Depends(token_auth_scheme))->dict:
     from repositories.tokens_repo import get_admin_access_tokens
-    
     try:
-        decoded_access_token = await decode_jwt_token(token=token.credentials)
+        decoded_access_token = await decode_jwt_token(token=token.credentials) # type: ignore
         if not decoded_access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -124,7 +123,6 @@ async def verify_admin_token(token: str = Depends(token_auth_scheme))->dict:
                 detail="Invalid admin token"
             )
         result = await get_admin_access_tokens(accessToken=access_token)
-
         if result is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -132,39 +130,49 @@ async def verify_admin_token(token: str = Depends(token_auth_scheme))->dict:
             )
         if isinstance(result, accessTokenOut):
             return decoded_access_token
+        # If result is not accessTokenOut, raise exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin token"
+        )
     except TypeError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Access Token Expired")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access Token Expired")
     
     
            
 async def verify_admin_token_otp(token: str = Depends(token_auth_scheme))->dict:
     try:
-        result = await validate_admin_accesstoken_otp(accessToken=str(token.credentials))
+        result = await validate_admin_accesstoken_otp(accessToken=str(token.credentials)) # type: ignore
 
-        if result==None:
+        if result is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid admin token"
             )
-        elif result=="active":
+        if result == "active":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Admin Token has been activated"
             )
-        elif isinstance(result, accessTokenOut):
-            decoded_access_token = await decode_jwt_token(token=token.credentials)
+        if isinstance(result, accessTokenOut):
+            decoded_access_token = await decode_jwt_token(token=token.credentials) # type: ignore
             if not decoded_access_token:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid admin token"
                 )
             return decoded_access_token
+        # If result is not accessTokenOut and not handled above, raise exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin token"
+        )
     except TypeError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Access Token Expired")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access Token Expired")
 
 
 async def verify_any_token(token:str=Depends(token_auth_scheme))->dict | JWTPayload:
-    token_type = await decode_jwt_token(token=token.credentials)
+    token_type = await decode_jwt_token(token=token.credentials) # type: ignore
     if isinstance(token_type,dict):
         if token_type.get('role')=='admin':
             return await verify_admin_token(token=token)

@@ -1,12 +1,13 @@
 
 from bson import ObjectId
 from fastapi import HTTPException
-from typing import List
+from typing import List, Optional, Union
 from repositories.reset_token import create_reset_token, generate_otp, get_reset_token
 from repositories.rider_repo import (
     create_rider,
     get_rider,
     get_riders,
+    search_riders,
     update_rider,
     delete_rider,
 )
@@ -182,7 +183,21 @@ async def retrieve_riders(start=0,stop=100) -> List[RiderOut]:
     return await get_riders(start=start,stop=stop)
 
 
-async def update_rider_by_id(user_id: str, user_data: RiderUpdate,is_password_getting_changed:bool=False) -> RiderOut:
+async def retrieve_riders_by_email_and_status(
+    email_address: Optional[str] = None,
+    status: Optional[AccountStatus] = None,
+    start: int = 0,
+    stop: int = 100,
+) -> List[RiderOut]:
+    return await search_riders(
+        email_address=email_address,
+        status=status,
+        start=start,
+        stop=stop,
+    )
+
+
+async def update_rider_by_id(user_id: str, user_data: Union[RiderUpdate,RiderUpdatePassword],is_password_getting_changed:bool=False) -> RiderOut:
     """_summary_
 
     Raises:

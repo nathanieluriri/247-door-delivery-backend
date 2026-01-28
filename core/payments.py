@@ -94,8 +94,11 @@ class StripePaymentProvider(PaymentProvider):
             raise HTTPException(status_code=404, detail="Rider email not found.")
 
         amount = int(round(ride.price / 10))
+        stops_summary = " → ".join(ride.stops) if ride.stops else "No stops"
         description = (
-            f"Pickup: {ride.origin.address}\n"
+            f"Pickup: {ride.pickup}\n"
+            f"Destination: {ride.destination}\n"
+            f"Stops: {stops_summary}\n"
             f"Distance: {ride.map.totalDistanceMeters / 1000:.1f} km\n"
             f"Duration: {ride.map.totalDurationSeconds // 60} mins\n"
         )
@@ -141,10 +144,14 @@ class StripePaymentProvider(PaymentProvider):
         finalized_invoice = await run_in_threadpool(stripe.Invoice.finalize_invoice, invoice.id)
 
         return {
-            "invoice_id": finalized_invoice.id,
-            "invoice_url": finalized_invoice.hosted_invoice_url,
+            "id": finalized_invoice.id,
             "status": finalized_invoice.status,
+            "amount_paid": finalized_invoice.amount_paid,
+            "currency": finalized_invoice.currency,
+            "customer": finalized_invoice.customer,
+            "metadata": finalized_invoice.metadata or {},
             "email_sent_to": rider.email,
+            "invoice_url": finalized_invoice.hosted_invoice_url,
         }
 
     async def refund_payment(self, payment_intent_id: str, amount: int = None) -> dict:
