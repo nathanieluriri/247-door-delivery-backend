@@ -114,6 +114,21 @@ fasterapi make_repo post
 
 ---
 
+## ⚙️ Environment Variables
+
+The app uses environment variables for configuration.
+
+### Driver vehicle validation
+
+These settings control acceptable vehicle year ranges for driver profiles:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DRIVER_VEHICLE_MIN_YEAR` | `2002` | Minimum allowed vehicle year |
+| `DRIVER_VEHICLE_MAX_YEAR` | current year | Maximum allowed vehicle year |
+
+---
+
 ## ✅ To-Do
 
 * [ ] Add support for route generation

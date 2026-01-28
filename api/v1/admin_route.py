@@ -379,6 +379,7 @@ async def create_a_ride_for_user(
     ride_data:RideBase,
     userId:str,
     token: accessTokenOut = Depends(verify_admin_token),
+    payment_service: PaymentService = Depends(get_payment_service),
 ):
     pick_up = await get_place_details(place_id=ride_data.pickup)
     drop_off = await get_place_details(place_id=ride_data.destination)
@@ -405,9 +406,17 @@ async def create_a_ride_for_user(
         time=map.totalDurationSeconds,
         vehicle=vehicle,
     )
-    ride_create= RideCreate(**ride_data.model_dump(),userId=userId,price=price,origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),map=map)
+    ride_create= RideCreate(
+        **ride_data.model_dump(),
+        userId=userId,
+        price=price,
+        origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),
+        map=map,
+        rideStatus=RideStatus.findingDriver,
+        paymentStatus=False,
+    )
     
-    ride  = await add_ride_admin_func(ride_data=ride_create)
+    ride  = await add_ride_admin_func(ride_data=ride_create, payment_service=payment_service)
     return APIResponse(data=ride,status_code=200,detail="successfully created ride for user")
 
 

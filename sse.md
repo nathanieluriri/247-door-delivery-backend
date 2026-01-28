@@ -88,6 +88,13 @@ Query parameters:
 | ride_id | string or null | no | Filter by ride id |
 | event_types | array[string] or null | no | Filter by event type |
 
+Notes:
+- Only the latest active driver subscription receives `ride_request` events.
+- Driver `ride_request` events are filtered by driver vehicle type and live location.
+- Drivers update live location via `POST /api/v1/drivers/location`.
+- Vehicle details are set via `PUT /api/v1/drivers/vehicle`.
+- Drivers with incomplete vehicle details do not receive `ride_request` events.
+
 Response example (SSE):
 ```
 HTTP/1.1 200 OK
@@ -191,6 +198,7 @@ Authorization: Bearer <access_token>
 
 Notes:
 - Streams ride_request and ride_status_update events for the driver.
+- `ride_request` events are filtered by vehicle type and distance to pickup.
 
 Response example (SSE):
 ```

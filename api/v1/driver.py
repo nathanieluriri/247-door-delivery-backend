@@ -33,6 +33,8 @@ from schemas.driver import (
     DriverUpdate,
     DriverRefresh,
     DriverUpdatePassword,
+    DriverLocationUpdate,
+    DriverVehicleUpdate,
 )
 from schemas.ride import RideUpdate
 from security.account_status_checks import check_driver_account_status
@@ -46,6 +48,8 @@ from services.driver_service import (
     retrieve_driver_by_driver_id,
     update_driver,
     update_driver_by_id,
+    update_driver_location,
+    update_driver_vehicle,
     refresh_driver_tokens_reduce_number_of_logins,
     oauth
 
@@ -122,11 +126,10 @@ async def get_driver_details(token:accessTokenOut = Depends(verify_token_driver_
         raise HTTPException(status_code=500,detail=f"{e}")
      
 @router.post("/signup", response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut])
-async def signup_new_driver(user_data:DriverBase):
+async def signup_new_driver(user_data:DriverCreate):
     if len(user_data.password)<8:
         raise HTTPException(status_code=401,detail="Password too short")
-    new_user = DriverCreate(**user_data.model_dump())
-    items = await add_driver(driver_data=new_user)
+    items = await add_driver(driver_data=user_data)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
@@ -152,6 +155,24 @@ async def update_driver_profile(driver_details:DriverUpdate,token:accessTokenOut
     driver =  await update_driver_by_id(driver_id=token.userId,driver_data=driver_details)
     return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
      
+
+
+@router.post("/location", response_model=APIResponse[bool], dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
+async def update_driver_current_location(
+    payload: DriverLocationUpdate,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    await update_driver_location(driver_id=token.userId, location=payload)
+    return APIResponse(status_code=200, data=True, detail="Location updated")
+
+
+@router.put("/vehicle", response_model=APIResponse[DriverOut], dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
+async def update_driver_vehicle_details(
+    payload: DriverVehicleUpdate,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    driver = await update_driver_vehicle(driver_id=token.userId, vehicle_details=payload)
+    return APIResponse(status_code=200, data=driver, detail="Vehicle details updated")
 
 
 

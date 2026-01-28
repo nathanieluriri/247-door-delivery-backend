@@ -95,18 +95,34 @@ async def add_ride(
 ) -> RideOut:
     """Adds an entry of RideCreate to the database and returns an object."""
     
- 
+    try:
+        from services.rider_service import retrieve_rider_by_rider_id
+        rider = await retrieve_rider_by_rider_id(id=ride_data.userId)
+        if getattr(rider, "title", None) == "partner":
+            ride_data = RideCreate(
+                **ride_data.model_dump(),
+                rideStatus=RideStatus.findingDriver,
+                paymentStatus=False,
+            )
+    except Exception:
+        pass
     
     await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
     ride = await create_ride(ride_data)
     if not ride.id:
         raise HTTPException(status_code=500, detail="Ride id missing after creation")
-    payment = await payment_service.create_payment_link(ride_id=ride.id)
-    ride = await update_ride(
-        {"_id": ObjectId(ride.id)},
-        RideUpdate(paymentLink=payment),
-    )
+    if ride_data.paymentStatus:
+        payment = None
+    else:
+        payment = await payment_service.create_payment_link(ride_id=ride.id)
+        ride = await update_ride(
+            {"_id": ObjectId(ride.id)},
+            RideUpdate(paymentLink=payment),
+        )
     try:
+        pickup_location = None
+        if ride.origin:
+            pickup_location = (ride.origin.latitude, ride.origin.longitude)
         await publish_ride_request(
             ride_id=ride.id,
             pickup=ride.pickup,
@@ -114,6 +130,7 @@ async def add_ride(
             vehicle_type=str(ride.vehicleType),
             fare_estimate=ride.price,
             rider_id=ride.userId,
+            pickup_location=pickup_location,
         )
     except Exception:
         pass
@@ -134,7 +151,7 @@ async def add_ride(
  
 async def add_ride_admin_func(
     ride_data: RideCreate,
-    _payment_service: PaymentService = Depends(get_payment_service)
+    payment_service: PaymentService = Depends(get_payment_service)
 ) -> RideOut:
     """Adds an entry of RideCreate to the database and returns an object."""
     
@@ -142,6 +159,32 @@ async def add_ride_admin_func(
     
     await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
     ride = await create_ride(ride_data)
+    if not ride.id:
+        raise HTTPException(status_code=500, detail="Ride id missing after creation")
+    if ride_data.paymentStatus:
+        payment = None
+    else:
+        payment = await payment_service.create_payment_link(ride_id=ride.id)
+        ride = await update_ride(
+            {"_id": ObjectId(ride.id)},
+            RideUpdate(paymentLink=payment),
+        )
+
+    try:
+        pickup_location = None
+        if ride.origin:
+            pickup_location = (ride.origin.latitude, ride.origin.longitude)
+        await publish_ride_request(
+            ride_id=ride.id,
+            pickup=ride.pickup,
+            destination=ride.destination,
+            vehicle_type=str(ride.vehicleType),
+            fare_estimate=ride.price,
+            rider_id=ride.userId,
+            pickup_location=pickup_location,
+        )
+    except Exception:
+        pass
 
     return ride
 

@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import time
 import uuid
@@ -15,6 +14,9 @@ from schemas.sse import SSEEvent, RideStatusUpdate, ChatMessageEvent, RideReques
 RETRY_AFTER_SECONDS = int(os.getenv("SSE_RETRY_AFTER_SECONDS", "5"))
 EVENT_TTL_SECONDS = int(os.getenv("SSE_EVENT_TTL_SECONDS", "86400"))
 POLL_INTERVAL_SECONDS = float(os.getenv("SSE_POLL_INTERVAL_SECONDS", "1"))
+DRIVER_DISCOVERY_RADIUS_KM = float(os.getenv("DRIVER_DISCOVERY_RADIUS_KM", "5"))
+DRIVER_META_TTL_SECONDS = int(os.getenv("DRIVER_META_TTL_SECONDS", "120"))
+DRIVER_GEO_INDEX = os.getenv("DRIVER_GEO_INDEX", "drivers:geo_index")
 
 
 def _pending_key(user_type: str, user_id: str) -> str:
@@ -27,6 +29,14 @@ def _event_key(event_id: str) -> str:
 
 def _subscribers_key(user_type: str) -> str:
     return f"sse:subscribers:{user_type}"
+
+
+def _driver_presence_key(driver_id: str) -> str:
+    return f"sse:driver_presence:{driver_id}"
+
+
+def _active_session_key(user_type: str, user_id: str) -> str:
+    return f"sse:session:{user_type}:{user_id}"
 
 
 def _format_sse(event: SSEEvent) -> str:
@@ -44,6 +54,56 @@ async def unregister_subscriber(user_type: str, user_id: str) -> None:
 
 async def get_subscribers(user_type: str) -> Iterable[str]:
     return await async_redis.smembers(_subscribers_key(user_type))
+
+
+async def set_driver_presence(driver_id: str, meta: dict) -> None:
+    if not meta:
+        return
+    meta_key = _driver_presence_key(driver_id)
+    await async_redis.hset(meta_key, mapping=meta)
+    await async_redis.expire(meta_key, DRIVER_META_TTL_SECONDS)
+
+
+async def get_driver_presence(driver_id: str) -> dict:
+    meta_key = _driver_presence_key(driver_id)
+    return await async_redis.hgetall(meta_key)
+
+
+async def delete_driver_presence(driver_id: str) -> None:
+    meta_key = _driver_presence_key(driver_id)
+    await async_redis.delete(meta_key)
+
+
+def _normalize_vehicle_type(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = value.strip().upper()
+    if "." in normalized:
+        normalized = normalized.split(".")[-1]
+    return normalized
+
+
+async def update_driver_presence(
+    driver_id: str,
+    latitude: float,
+    longitude: float,
+    vehicle_type: Optional[str],
+    profile_complete: bool = False,
+    timestamp: Optional[int] = None,
+) -> None:
+    now = int(time.time()) if timestamp is None else int(timestamp)
+    await async_redis.geoadd(DRIVER_GEO_INDEX, {driver_id: (longitude, latitude)})
+    await set_driver_presence(
+        driver_id,
+        {
+            "vehicle_type": _normalize_vehicle_type(vehicle_type),
+            "latitude": latitude,
+            "longitude": longitude,
+            "last_seen": now,
+            "profile_complete": "1" if profile_complete else "0",
+        },
+    )
+
 
 
 async def publish_event(
@@ -104,6 +164,13 @@ async def stream_events(
     ride_id: Optional[str] = None,
 ):
     await register_subscriber(user_type, user_id)
+    session_id = None
+    active_key = None
+    if user_type == "driver":
+        session_id = uuid.uuid4().hex
+        active_key = _active_session_key(user_type, user_id)
+        await async_redis.set(active_key, session_id, ex=EVENT_TTL_SECONDS)
+
     pending_key = _pending_key(user_type, user_id)
     allowed_types = set(event_types) if event_types else None
 
@@ -111,6 +178,11 @@ async def stream_events(
         while True:
             if await request.is_disconnected():
                 break
+            if session_id and active_key:
+                current_session = await async_redis.get(active_key)
+                if current_session != session_id:
+                    break
+                await async_redis.expire(active_key, EVENT_TTL_SECONDS)
 
             now = int(time.time())
             pending_ids = await async_redis.lrange(pending_key, 0, -1)
@@ -152,7 +224,14 @@ async def stream_events(
                 yield ": keep-alive\n\n"
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
     finally:
-        await unregister_subscriber(user_type, user_id)
+        if session_id and active_key:
+            current_session = await async_redis.get(active_key)
+            if current_session == session_id:
+                await async_redis.delete(active_key)
+                await delete_driver_presence(user_id)
+                await unregister_subscriber(user_type, user_id)
+        else:
+            await unregister_subscriber(user_type, user_id)
 
 
 async def publish_ride_status_update(
@@ -199,12 +278,64 @@ async def publish_chat_message(
         await publish_event("driver", driver_id, "chat_message", payload)
 
 
-async def publish_ride_request_to_drivers(payload: RideRequestEvent) -> int:
-    driver_ids = await get_subscribers("driver")
+async def publish_ride_request_to_drivers(
+    payload: RideRequestEvent,
+    pickup_location: Optional[tuple[float, float]] = None,
+) -> int:
+    pickup_lat = None
+    pickup_lng = None
+    if pickup_location:
+        pickup_lat, pickup_lng = pickup_location
+
+    if pickup_lat is None or pickup_lng is None:
+        return 0
+
+    requested_vehicle = _normalize_vehicle_type(payload.vehicle_type)
     count = 0
+    driver_ids = await async_redis.georadius(
+        name=DRIVER_GEO_INDEX,
+        longitude=pickup_lng,
+        latitude=pickup_lat,
+        radius=DRIVER_DISCOVERY_RADIUS_KM,
+        unit="km",
+    )
     for driver_id in driver_ids:
+        meta = await get_driver_presence(driver_id)
+        if not meta:
+            continue
+
+        if meta.get("profile_complete") not in {"1", "true", "True", "TRUE"}:
+            continue
+
+        driver_vehicle = _normalize_vehicle_type(meta.get("vehicle_type"))
+        if requested_vehicle and driver_vehicle and driver_vehicle != requested_vehicle:
+            continue
+
+        if requested_vehicle and not driver_vehicle:
+            continue
+
+        driver_lat = meta.get("latitude")
+        driver_lng = meta.get("longitude")
+        if pickup_lat is None or pickup_lng is None or driver_lat is None or driver_lng is None:
+            continue
+
+        try:
+            driver_lat = float(driver_lat)
+            driver_lng = float(driver_lng)
+        except (TypeError, ValueError):
+            continue
+
+        last_seen = meta.get("last_seen")
+        try:
+            last_seen = int(float(last_seen)) if last_seen is not None else None
+        except (TypeError, ValueError):
+            last_seen = None
+        if last_seen is None or (int(time.time()) - last_seen) > DRIVER_META_TTL_SECONDS:
+            continue
+
         await publish_event("driver", driver_id, "ride_request", payload)
         count += 1
+
     return count
 
 
@@ -235,6 +366,7 @@ async def publish_ride_request(
     vehicle_type: str,
     fare_estimate: Optional[float],
     rider_id: Optional[str],
+    pickup_location: Optional[tuple[float, float]] = None,
 ) -> int:
     payload = RideRequestEvent(
         rideId=ride_id,
@@ -244,4 +376,4 @@ async def publish_ride_request(
         fareEstimate=fare_estimate,
         riderId=rider_id,
     )
-    return await publish_ride_request_to_drivers(payload)
+    return await publish_ride_request_to_drivers(payload, pickup_location=pickup_location)

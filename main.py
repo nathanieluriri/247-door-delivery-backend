@@ -294,6 +294,7 @@ async def test_sse_broadcast(pickup_lat: float, pickup_lon: float):
         vehicle_type="CAR",
         fare_estimate=123445,
         rider_id=None,
+        pickup_location=(pickup_lat, pickup_lon),
     )
 
 

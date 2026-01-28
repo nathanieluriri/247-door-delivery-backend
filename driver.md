@@ -40,6 +40,13 @@ Response Body
 | data.firstName | string or null | no | First name |
 | data.lastName | string or null | no | Last name |
 | data.stripeAccountId | string or null | no | Stripe account id |
+| data.vehicleType | string or null | no | Vehicle type (CAR, MOTOR_BIKE) |
+| data.vehicleMake | string or null | no | Vehicle make |
+| data.vehicleModel | string or null | no | Vehicle model |
+| data.vehicleColor | string or null | no | Vehicle color |
+| data.vehiclePlateNumber | string or null | no | Plate number |
+| data.vehicleYear | integer or null | no | Vehicle year |
+| data.profileComplete | boolean | yes | True when vehicle details are complete |
 | data.accountStatus | AccountStatus or null | no | active, pendingVerification, suspended, banned, deactivated |
 | data.id | string or null | no | Driver id |
 | data.dateCreated | integer or null | no | Unix timestamp |
@@ -209,6 +216,60 @@ Request Body
 | firstName | string or null | no | First name |
 | lastName | string or null | no | Last name |
 | last_updated | integer | no | Unix timestamp |
+
+**Update Driver Vehicle Details**
+```
+PUT /api/v1/drivers/vehicle
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "vehicleType": "CAR",
+  "vehicleMake": "Toyota",
+  "vehicleModel": "Corolla",
+  "vehicleColor": "Blue",
+  "vehiclePlateNumber": "ABC-1234",
+  "vehicleYear": 2018
+}
+```
+- Required before updating live location or receiving ride requests
+- Vehicle year minimum is controlled by admin configuration (default 2002)
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| vehicleType | string | yes | Vehicle type (CAR, MOTOR_BIKE) |
+| vehicleMake | string | yes | Vehicle make |
+| vehicleModel | string | yes | Vehicle model |
+| vehicleColor | string | yes | Vehicle color |
+| vehiclePlateNumber | string | yes | Plate number |
+| vehicleYear | integer | yes | Vehicle year |
+
+**Update Driver Location**
+```
+POST /api/v1/drivers/location
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "latitude": 6.5244,
+  "longitude": 3.3792,
+  "accuracy_m": 12,
+  "timestamp": 1700000000
+}
+```
+- Updates driver live location for ride matching
+- Requires vehicle details to be set
+
+Schema Fields
+Request Body
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| latitude | number | yes | Latitude |
+| longitude | number | yes | Longitude |
+| accuracy_m | number or null | no | GPS accuracy in meters |
+| timestamp | integer | no | Unix timestamp |
 
 
 Response Body
@@ -448,6 +509,10 @@ Query Parameters
 | --- | --- | --- | --- |
 | ride_id | string or null | no | Filter by ride id |
 | event_types | array[string] or null | no | Filter by event type |
+| vehicle_type | string or null | no | Driver vehicle type for ride_request matching |
+| latitude | number or null | no | Driver latitude for ride_request matching |
+| longitude | number or null | no | Driver longitude for ride_request matching |
+| radius_km | number or null | no | Driver match radius (defaults to 5km) |
 
 Response Stream
 | Field | Type | Required | Description |
@@ -465,6 +530,8 @@ GET /api/v1/drivers/ride/events
 Authorization: Bearer <access_token>
 ```
 - Streams driver ride notifications
+- Only the latest active driver subscription receives `ride_request` events
+- `ride_request` events are filtered by `vehicle_type` and distance to pickup
 
 Schema Fields
 Response Stream

@@ -38,6 +38,8 @@ from schemas.driver import (
     DriverOut,
     DriverUpdatePassword,
     DriverUpdateAccountStatus,
+    DriverLocationUpdate,
+    DriverVehicleUpdate,
 )
 from schemas.imports import ALLOWED_ACCOUNT_STATUS_TRANSITIONS, AccountStatus, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse
 from schemas.tokens_schema import accessTokenCreate, refreshTokenCreate
@@ -46,7 +48,11 @@ from security.hash import check_password
 from authlib.integrations.starlette_client import OAuth
 
 from services.email_service import send_ban_warning, send_otp
-from services.sse_service import publish_ride_request, publish_ride_request_to_driver
+from services.sse_service import (
+    publish_ride_request,
+    publish_ride_request_to_driver,
+    update_driver_presence,
+)
 
 oauth = OAuth()
 oauth.register(
@@ -307,6 +313,33 @@ async def update_driver_by_id_admin_func(
             status_code=404, detail="Driver not found or update failed"
         )
 
+    return result
+
+
+async def update_driver_location(driver_id: str, location: DriverLocationUpdate) -> None:
+    if not ObjectId.is_valid(driver_id):
+        raise HTTPException(status_code=400, detail="Invalid driver ID format")
+    driver = await retrieve_driver_by_driver_id(id=driver_id)
+    if not getattr(driver, "profileComplete", False):
+        raise HTTPException(status_code=400, detail="Vehicle details must be set before updating location")
+    vehicle_type = getattr(driver, "vehicleType", None)
+    await update_driver_presence(
+        driver_id=driver_id,
+        latitude=location.latitude,
+        longitude=location.longitude,
+        vehicle_type=str(vehicle_type) if vehicle_type else None,
+        profile_complete=getattr(driver, "profileComplete", False),
+        timestamp=location.timestamp,
+    )
+
+
+async def update_driver_vehicle(driver_id: str, vehicle_details: DriverVehicleUpdate) -> DriverOut:
+    if not ObjectId.is_valid(driver_id):
+        raise HTTPException(status_code=400, detail="Invalid driver ID format")
+    filter_dict = {"_id": ObjectId(driver_id)}
+    result = await update_driver(filter_dict, vehicle_details)
+    if not result:
+        raise HTTPException(status_code=404, detail="Driver not found or update failed")
     return result
 
 

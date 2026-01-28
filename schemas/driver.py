@@ -7,11 +7,16 @@
 #
 # ============================================================================
 
-from schemas.imports import *
-from pydantic import AliasChoices, Field
+import os
 import time
+from schemas.imports import *
+from core.vehicles_config import VehicleType
+from pydantic import AliasChoices, Field, field_validator
 
 from security.hash import hash_password
+
+VEHICLE_MIN_YEAR = int(os.getenv("DRIVER_VEHICLE_MIN_YEAR", "2002"))
+VEHICLE_MAX_YEAR = int(os.getenv("DRIVER_VEHICLE_MAX_YEAR", str(time.gmtime().tm_year)))
 
 class DriverBase(BaseModel):
     # Add other fields here 
@@ -78,6 +83,13 @@ class DriverOut(DriverBase):
     firstName:Optional[str]=''
     lastName:Optional[str]=''     
     stripeAccountId: Optional[str] = None
+    vehicleType: Optional[VehicleType] = None
+    vehicleMake: Optional[str] = None
+    vehicleModel: Optional[str] = None
+    vehicleColor: Optional[str] = None
+    vehiclePlateNumber: Optional[str] = None
+    vehicleYear: Optional[int] = None
+    profileComplete: bool = Field(default=False, alias="profileComplete")
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     id: Optional[str] = Field(
         default=None,
@@ -110,6 +122,19 @@ class DriverOut(DriverBase):
         if "_id" in values and isinstance(values["_id"], ObjectId):
             values["_id"] = str(values["_id"])  # coerce to string before validation
         return values
+
+    @model_validator(mode="after")
+    def set_profile_complete(self):
+        required_fields = [
+            self.vehicleType,
+            self.vehicleMake,
+            self.vehicleModel,
+            self.vehicleColor,
+            self.vehiclePlateNumber,
+            self.vehicleYear,
+        ]
+        self.profileComplete = all(field is not None and str(field).strip() for field in required_fields)
+        return self
             
     class Config:
         populate_by_name = True  # allows using `id` when constructing the model
@@ -117,6 +142,53 @@ class DriverOut(DriverBase):
         json_encoders ={
             ObjectId: str  # automatically converts ObjectId → str
         }
+
+
+class DriverLocationUpdate(BaseModel):
+    latitude: float
+    longitude: float
+    accuracy_m: Optional[float] = None
+    timestamp: int = Field(default_factory=lambda: int(time.time()))
+
+
+class DriverVehicleUpdate(BaseModel):
+    vehicleType: VehicleType
+    vehicleMake: str
+    vehicleModel: str
+    vehicleColor: str
+    vehiclePlateNumber: str
+    vehicleYear: int
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+
+    @field_validator("vehicleMake", "vehicleModel", "vehicleColor")
+    @classmethod
+    def normalize_text_fields(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Field must be at least 2 characters")
+        if len(value) > 50:
+            raise ValueError("Field must be 50 characters or fewer")
+        return value
+
+    @field_validator("vehiclePlateNumber")
+    @classmethod
+    def validate_plate_number(cls, value: str) -> str:
+        value = value.strip().upper()
+        if len(value) < 4 or len(value) > 12:
+            raise ValueError("Plate number must be between 4 and 12 characters")
+        for ch in value:
+            if not (ch.isalnum() or ch == "-"):
+                raise ValueError("Plate number may only contain letters, numbers, and '-'")
+        return value
+
+    @field_validator("vehicleYear")
+    @classmethod
+    def validate_vehicle_year(cls, value: int) -> int:
+        if value < VEHICLE_MIN_YEAR:
+            raise ValueError(f"Vehicle year must be >= {VEHICLE_MIN_YEAR}")
+        if value > VEHICLE_MAX_YEAR:
+            raise ValueError(f"Vehicle year must be <= {VEHICLE_MAX_YEAR}")
+        return value
         
         
         
