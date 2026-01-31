@@ -1,7 +1,8 @@
 
 import os
+import uuid
 from urllib.parse import urlencode
-from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path, Depends
+from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path, Depends, UploadFile, File, Form
 from typing import List, Optional
 from fastapi.responses import RedirectResponse, StreamingResponse
 from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
@@ -37,6 +38,7 @@ from schemas.driver import (
     DriverVehicleUpdate,
 )
 from schemas.ride import RideUpdate
+from schemas.driver_document import DriverDocumentCreate, DriverDocumentOut, DocumentType
 from security.account_status_checks import check_driver_account_status
 from services.driver_service import (
     add_driver,
@@ -53,6 +55,10 @@ from services.driver_service import (
     refresh_driver_tokens_reduce_number_of_logins,
     oauth
 
+)
+from services.driver_document_service import (
+    store_driver_document,
+    get_driver_documents,
 )
 from security.auth import verify_token_to_refresh, verify_token_driver_role
 from services.rating_service import add_rating, retrieve_rating_by_user_id
@@ -173,6 +179,61 @@ async def update_driver_vehicle_details(
 ):
     driver = await update_driver_vehicle(driver_id=token.userId, vehicle_details=payload)
     return APIResponse(status_code=200, data=driver, detail="Vehicle details updated")
+
+
+# ---------------------------------
+# ------- DOCUMENT UPLOAD ---------
+# ---------------------------------
+
+
+def _ensure_doc_dir(driver_id: str) -> str:
+    base_dir = os.path.join("uploads", "documents", driver_id)
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
+
+
+@router.post(
+    "/documents/upload",
+    response_model=APIResponse[DriverDocumentOut],
+    dependencies=[Depends(verify_token_driver_role)],
+)
+async def upload_driver_document(
+    documentType: DocumentType = Form(...),
+    file: UploadFile = File(...),
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    """
+    Upload a driver compliance document. Files are stored locally under
+    `uploads/documents/{driverId}` with metadata persisted in Mongo.
+    """
+    dest_dir = _ensure_doc_dir(token.userId)
+    file_id = uuid.uuid4().hex
+    safe_name = f\"{file_id}-{file.filename}\"
+    dest_path = os.path.join(dest_dir, safe_name)
+
+    content = await file.read()
+    with open(dest_path, \"wb\") as f:
+        f.write(content)
+
+    doc = DriverDocumentCreate(
+        driverId=token.userId,
+        documentType=documentType,
+        filePath=dest_path,
+        fileName=file.filename,
+        mimeType=file.content_type,
+    )
+    created = await store_driver_document(doc)
+    return APIResponse(status_code=200, data=created, detail=\"Document uploaded\")
+
+
+@router.get(
+    "/documents",
+    response_model=APIResponse[List[DriverDocumentOut]],
+    dependencies=[Depends(verify_token_driver_role)],
+)
+async def list_my_documents(token: accessTokenOut = Depends(verify_token_driver_role)):
+    docs = await get_driver_documents(driver_id=token.userId)
+    return APIResponse(status_code=200, data=docs, detail=\"Documents fetched\")
 
 
 

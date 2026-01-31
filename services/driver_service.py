@@ -330,6 +330,7 @@ async def update_driver_location(driver_id: str, location: DriverLocationUpdate)
         vehicle_type=str(vehicle_type) if vehicle_type else None,
         profile_complete=getattr(driver, "profileComplete", False),
         timestamp=location.timestamp,
+        account_status=getattr(driver, "accountStatus", None),
     )
 
 

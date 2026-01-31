@@ -22,7 +22,7 @@ from core.database import db
 from security.encrypting_jwt import decode_jwt_token
 from redis_om import Migrator
 from starlette.concurrency import run_in_threadpool
-from services.sse_service import publish_ride_request
+from services.sse_service import publish_ride_request, cleanup_stale_driver_locations
 from middlewares.rate_limiting_middleware import RateLimitingMiddleware
 
 MONGO_URI = os.getenv("MONGO_URL")
@@ -47,6 +47,13 @@ async def lifespan(app:FastAPI):
         id="apscheduler_heartbeat",
         name="APScheduler Heartbeat",
         replace_existing=True
+    )
+    scheduler.add_job(
+        cleanup_stale_driver_locations,
+        trigger=IntervalTrigger(seconds=180),
+        id="driver_presence_cleanup",
+        name="Remove stale driver geo entries",
+        replace_existing=True,
     )
     
     Migrator().run()

@@ -90,6 +90,7 @@ async def update_driver_presence(
     vehicle_type: Optional[str],
     profile_complete: bool = False,
     timestamp: Optional[int] = None,
+    account_status: Optional[str] = None,
 ) -> None:
     now = int(time.time()) if timestamp is None else int(timestamp)
     await async_redis.geoadd(DRIVER_GEO_INDEX, {driver_id: (longitude, latitude)})
@@ -101,6 +102,7 @@ async def update_driver_presence(
             "longitude": longitude,
             "last_seen": now,
             "profile_complete": "1" if profile_complete else "0",
+            "account_status": (account_status or "").lower(),
         },
     )
 
@@ -303,6 +305,8 @@ async def publish_ride_request_to_drivers(
         meta = await get_driver_presence(driver_id)
         if not meta:
             continue
+        if meta.get("account_status") not in {"active"}:
+            continue
 
         if meta.get("profile_complete") not in {"1", "true", "True", "TRUE"}:
             continue
@@ -377,3 +381,29 @@ async def publish_ride_request(
         riderId=rider_id,
     )
     return await publish_ride_request_to_drivers(payload, pickup_location=pickup_location)
+
+
+async def cleanup_stale_driver_locations() -> int:
+    """
+    Remove drivers from the GEO index whose presence metadata is stale.
+    Returns the number of entries removed.
+    """
+    now = int(time.time())
+    removed = 0
+    driver_ids = await async_redis.zrange(DRIVER_GEO_INDEX, 0, -1)
+    for driver_id in driver_ids:
+        meta = await get_driver_presence(driver_id)
+        if not meta:
+            await async_redis.zrem(DRIVER_GEO_INDEX, driver_id)
+            removed += 1
+            continue
+        last_seen = meta.get("last_seen")
+        try:
+            last_seen = int(float(last_seen)) if last_seen is not None else None
+        except (TypeError, ValueError):
+            last_seen = None
+        if last_seen is None or (now - last_seen) > DRIVER_META_TTL_SECONDS:
+            await async_redis.zrem(DRIVER_GEO_INDEX, driver_id)
+            await delete_driver_presence(driver_id)
+            removed += 1
+    return removed

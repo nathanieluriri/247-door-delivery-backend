@@ -388,8 +388,18 @@ async def update_ride_by_id(
 
     if rider_id:
         filter_dict["userId"] = rider_id
+
+    # Driver concurrency guard:
+    # - If ride already has a driver and it's not this driver, block.
+    # - If ride has no driver yet, allow this driver to claim without filtering by driverId.
     if driver_id:
-        filter_dict["driverId"] = driver_id
+        if ride.driverId and ride.driverId != driver_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride already assigned to another driver",
+            )
+        if ride.driverId:
+            filter_dict["driverId"] = driver_id
 
     # 4️⃣ Prevent no-op updates
     if (
@@ -563,10 +573,27 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
     current_ride = await retrieve_ride_by_ride_id(id=ride_id)
     
     ride_data = RideUpdate(**payload)
+
+    # Basic status validation similar to update_ride_by_id
+    if ride_data.rideStatus is not None:
+        if current_ride and ride_data.rideStatus == current_ride.rideStatus:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ride already in '{ride_data.rideStatus}' state",
+            )
+        if current_ride:
+            allowed_next_states = ALLOWED_RIDE_STATUS_TRANSITIONS.get(
+                current_ride.rideStatus, set()
+            )
+            if ride_data.rideStatus not in allowed_next_states:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid ride status transition: {current_ride.rideStatus} → {ride_data.rideStatus}",
+                )
+
     result = await update_ride(filter_dict, ride_data)
     if not result:
         raise HTTPException(status_code=404, detail="Ride not found or update failed")
-    # TODO: HAVE A LOGIC CASE FOR CONTAINING
      
     # Emit SSE status update if status changed
     if ride_data.rideStatus is not None and current_ride and ride_data.rideStatus != current_ride.rideStatus:
