@@ -11,6 +11,7 @@ from schemas.ride import RideOut, RideUpdate
 from schemas.rider_schema import RiderOut
 from schemas.stripe_event import StripeEventCreate
 from services.stripe_event_service import  retrieve_stripe_event_by_stripe_event_id
+from core.metrics import payment_failures
 
 load_dotenv()
 
@@ -235,6 +236,7 @@ class StripePaymentProvider(PaymentProvider):
         elif event_type == "invoice.payment_failed":
             invoice = InvoiceData(**data_obj)
             print(f"[WEBHOOK] Invoice payment failed: id={invoice.id}")
+            payment_failures.inc()
 
              
 

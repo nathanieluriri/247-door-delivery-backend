@@ -53,6 +53,7 @@ from services.sse_service import (
     publish_ride_request_to_driver,
     update_driver_presence,
 )
+from services.background_check_service import ensure_background_record, fetch_background_check
 
 oauth = OAuth()
 oauth.register(
@@ -72,6 +73,7 @@ async def add_driver(driver_data: DriverCreate) -> DriverOut:
     user =  await get_driver(filter_dict={"email":driver_data.email.lower()})
     if user==None:
         new_driver= await create_driver(driver_data=driver_data)
+        await ensure_background_record(new_driver.id)
         access_token = await add_access_tokens(token_data=accessTokenCreate(userId=new_driver.id))
         refresh_token  = await add_refresh_tokens(token_data=refreshTokenCreate(userId=new_driver.id,previousAccessToken=access_token.accesstoken))
         token_activation = new_driver.accountStatus==AccountStatus.ACTIVE
@@ -294,6 +296,14 @@ async def update_driver_by_id_admin_func(
     if driver_data.accountStatus is not None:
         current_status = existing_driver.accountStatus
         new_status = driver_data.accountStatus
+
+        if new_status == AccountStatus.ACTIVE:
+            bg = await fetch_background_check(driver_id)
+            if not bg or bg.status != "passed":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Background check must be PASSED before activation",
+                )
 
         allowed_next_states = ALLOWED_ACCOUNT_STATUS_TRANSITIONS.get(
             current_status, set()

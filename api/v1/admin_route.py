@@ -6,6 +6,7 @@ from core.payments import PaymentService, get_payment_service
 from core.vehicles import Vehicle
 from schemas.driver import DriverOut, DriverUpdateAccountStatus
 from schemas.driver_document import DocumentStatus, DriverDocumentUpdateStatus
+from schemas.background_check import BackgroundStatus
 from schemas.place import Location
 from schemas.response_schema import APIResponse
 from schemas.ride import RideBase, RideCreate, RideOut, RideUpdate
@@ -43,6 +44,7 @@ from services.driver_service import (
     
 )
 from services.driver_document_service import set_driver_document_status
+from services.background_check_service import record_background_result
 from services.audit_log_service import record_audit_event
 from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_place_details
 from services.ride_service import add_ride, add_ride_admin_func, retrieve_ride_by_ride_id, retrieve_rides_by_driver_id, retrieve_rides_by_user_id,update_ride_by_id_admin_func
@@ -350,6 +352,32 @@ async def review_driver_document(
         metadata={"status": status, "driverId": driverId, "reason": reason},
     )
     return APIResponse(status_code=200, data={"document": updated}, detail="Document status updated")
+
+
+@router.patch(
+    "/driver/{driverId}/background",
+    response_model=APIResponse[dict],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+)
+async def update_background_check(
+    driverId: str,
+    status: BackgroundStatus = Body(..., embed=True),
+    notes: str | None = Body(default=None, embed=True),
+    referenceId: str | None = Body(default=None, embed=True),
+    token: accessTokenOut = Depends(verify_admin_token),
+):
+    updated = await record_background_result(
+        driver_id=driverId, status=status, notes=notes, reference=referenceId
+    )
+    await record_audit_event(
+        actor_id=token.get("userId"),
+        actor_type="admin",
+        action="background_check_update",
+        target_type="driver",
+        target_id=driverId,
+        metadata={"status": status, "referenceId": referenceId, "notes": notes},
+    )
+    return APIResponse(status_code=200, data={"background": updated}, detail="Background check updated")
     
 # --------------------------------------------------
 # --------------- RIDER MANAGEMENT -----------------

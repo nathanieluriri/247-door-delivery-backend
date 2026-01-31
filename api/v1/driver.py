@@ -1,6 +1,5 @@
 
 import os
-import uuid
 from urllib.parse import urlencode
 from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path, Depends, UploadFile, File, Form
 from typing import List, Optional
@@ -60,6 +59,7 @@ from services.driver_document_service import (
     store_driver_document,
     get_driver_documents,
 )
+from core.storage import store_file, get_signed_url
 from security.auth import verify_token_to_refresh, verify_token_driver_role
 from services.rating_service import add_rating, retrieve_rating_by_user_id
 from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
@@ -186,12 +186,6 @@ async def update_driver_vehicle_details(
 # ---------------------------------
 
 
-def _ensure_doc_dir(driver_id: str) -> str:
-    base_dir = os.path.join("uploads", "documents", driver_id)
-    os.makedirs(base_dir, exist_ok=True)
-    return base_dir
-
-
 @router.post(
     "/documents/upload",
     response_model=APIResponse[DriverDocumentOut],
@@ -203,27 +197,29 @@ async def upload_driver_document(
     token: accessTokenOut = Depends(verify_token_driver_role),
 ):
     """
-    Upload a driver compliance document. Files are stored locally under
-    `uploads/documents/{driverId}` with metadata persisted in Mongo.
+    Upload a driver compliance document. Storage backend is configurable
+    (local or S3) and metadata is persisted in Mongo.
     """
-    dest_dir = _ensure_doc_dir(token.userId)
-    file_id = uuid.uuid4().hex
-    safe_name = f\"{file_id}-{file.filename}\"
-    dest_path = os.path.join(dest_dir, safe_name)
-
     content = await file.read()
-    with open(dest_path, \"wb\") as f:
-        f.write(content)
+    stored = store_file(
+        driver_id=token.userId,
+        filename=file.filename,
+        content=content,
+        content_type=file.content_type,
+    )
+    signed_url = stored.url or get_signed_url(stored.key)
 
     doc = DriverDocumentCreate(
         driverId=token.userId,
         documentType=documentType,
-        filePath=dest_path,
+        fileKey=stored.key,
         fileName=file.filename,
         mimeType=file.content_type,
+        storageProvider=stored.provider,
+        signedUrl=signed_url,
     )
     created = await store_driver_document(doc)
-    return APIResponse(status_code=200, data=created, detail=\"Document uploaded\")
+    return APIResponse(status_code=200, data=created, detail="Document uploaded")
 
 
 @router.get(
@@ -233,7 +229,10 @@ async def upload_driver_document(
 )
 async def list_my_documents(token: accessTokenOut = Depends(verify_token_driver_role)):
     docs = await get_driver_documents(driver_id=token.userId)
-    return APIResponse(status_code=200, data=docs, detail=\"Documents fetched\")
+    for d in docs:
+        if getattr(d, "storageProvider", None) == "s3":
+            d.signedUrl = get_signed_url(d.fileKey)
+    return APIResponse(status_code=200, data=docs, detail="Documents fetched")
 
 
 

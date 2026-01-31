@@ -10,6 +10,10 @@ from schemas.response_schema import APIResponse
 from limits import parse
 import time   
 import os
+import logging
+from logging.config import dictConfig
+from prometheus_fastapi_instrumentator import Instrumentator
+from middlewares.structured_logging_middleware import StructuredLoggingMiddleware
 from pymongo import ASCENDING
 from celery_worker import celery_app
 from contextlib import asynccontextmanager
@@ -91,13 +95,36 @@ async def lifespan(app:FastAPI):
     
     
 # Create the FastAPI app
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+dictConfig(
+    {
+        "version": 1,
+        "formatters": {
+            "json": {
+                "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+                "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s",
+            }
+        },
+        "handlers": {
+            "default": {
+                "level": LOG_LEVEL,
+                "class": "logging.StreamHandler",
+                "formatter": "json",
+            }
+        },
+        "root": {"level": LOG_LEVEL, "handlers": ["default"]},
+    }
+)
+
 app = FastAPI(
     
     lifespan= lifespan,
     title="REST API",
     
 )
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(StructuredLoggingMiddleware)
 
 app.add_middleware(SessionMiddleware, secret_key="not-some-random-string")
 

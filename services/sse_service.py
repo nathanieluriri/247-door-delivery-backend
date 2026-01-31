@@ -8,6 +8,7 @@ from fastapi import Request
 from pydantic import BaseModel
 
 from core.redis_cache import async_redis
+from core.metrics import sse_backlog
 from schemas.sse import SSEEvent, RideStatusUpdate, ChatMessageEvent, RideRequestEvent
 
 
@@ -188,6 +189,7 @@ async def stream_events(
 
             now = int(time.time())
             pending_ids = await async_redis.lrange(pending_key, 0, -1)
+            sse_backlog.observe(len(pending_ids))
             sent_any = False
 
             for event_id in pending_ids:

@@ -27,9 +27,11 @@ class DocumentType(str, Enum):
 class DriverDocumentCreate(BaseModel):
     driverId: str
     documentType: DocumentType
-    filePath: str
+    fileKey: str
     fileName: str
     mimeType: Optional[str] = None
+    storageProvider: str = "local"
+    signedUrl: Optional[str] = None
     status: DocumentStatus = DocumentStatus.PENDING
     metadata: Dict[str, Any] = Field(default_factory=dict)
     uploadedAt: int = Field(default_factory=lambda: int(time.time()))

@@ -21,6 +21,7 @@ utc = timezone.utc
 from core.payments import PaymentService, get_payment_service
 from services.sse_service import publish_ride_status_update, publish_ride_request
 from core.redis_cache import async_redis
+from core.metrics import match_time_seconds, driver_acceptance_rate, driver_rejects
 from repositories.ride import (
     check_if_user_has_an_existing_active_ride,
     create_ride,
@@ -488,6 +489,17 @@ async def update_ride_by_id(
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
+
+        # Record acceptance timing when a driver takes the ride
+        if ride.rideStatus == RideStatus.findingDriver and ride_data.rideStatus == RideStatus.arrivingToPickup:
+            try:
+                started = ride.date_created or ride.last_updated
+                if started:
+                    duration = time.time() - started
+                    match_time_seconds.observe(max(duration, 0))
+                driver_acceptance_rate.inc()
+            except Exception:
+                pass
 
     return result
 

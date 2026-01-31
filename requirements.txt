@@ -29,3 +29,9 @@ googlemaps
 pycountry
 stripe
 celery-aio-pool
+boto3
+python-json-logger
+prometheus-fastapi-instrumentator
+fakeredis
+pytest
+prometheus-client
