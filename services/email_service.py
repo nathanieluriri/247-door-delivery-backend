@@ -33,7 +33,7 @@ if missing_vars:
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_HOST = os.getenv("EMAIL_HOST")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT"))  # Cast after check
+EMAIL_PORT = int(os.getenv("EMAIL_PORT"))  # type: ignore # Cast after check
 
 # ------------------- Email Sending Function -------------------
 
@@ -81,16 +81,16 @@ def send_html_email_optimized(
         logger.info(f"Email sent to {receiver_email} from {sender_display_name} <{sender_email}>.")
 
     except smtplib.SMTPAuthenticationError as e:
-        logger.error(f"SMTP authentication failed: {e}")
+        logger.exception(f"SMTP authentication failed: {e}")
         raise
     except smtplib.SMTPConnectError as e:
-        logger.error(f"SMTP connection error: {e}")
+        logger.exception(f"SMTP connection error: {e}")
         raise
     except smtplib.SMTPException as e:
-        logger.error(f"SMTP error: {e}")
+        logger.exception(f"SMTP error: {e}")
         raise
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.exception(f"Unexpected error: {e}")
         raise
     finally:
         if server:
@@ -125,7 +125,7 @@ This is an automated message sent to tell {firstName} that there was a new sign 
         )
 
     except Exception as e:
-        logger.error(f"Failed to send OTP email to {receiver_email}: {e}")
+        logger.exception(f"Failed to send OTP email to {receiver_email}: {e}")
         return 1
 
 
@@ -154,7 +154,8 @@ def send_otp(otp: str, user_email:str,):
         return 0
 
     except Exception as e:
-        logger.error(f"Failed to send OTP email to {user_email}: {e}")
+        logger.exception(f"Failed to send OTP email to {user_email}: {e}")
+        print(f"Failed to send OTP email to {user_email}: {e}")
         return 1
 
 
@@ -183,7 +184,7 @@ def send_invite_notification(invitee_email: str, inviter_email:str,):
         )
 
     except Exception as e:
-        logger.error(f"Failed to send invitation email to {invitee_email}: {e}")
+        logger.exception(f"Failed to send invitation email to {invitee_email}: {e}")
         return 1
 
 
@@ -210,5 +211,5 @@ def send_revoke_notification(revoked_user_email: str, revoked_by_email:str,):
         )
 
     except Exception as e:
-        logger.error(f"Failed to send notification email to {revoked_user_email}: {e}")
+        logger.exception(f"Failed to send notification email to {revoked_user_email}: {e}")
         return 1

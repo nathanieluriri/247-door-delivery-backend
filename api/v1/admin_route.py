@@ -5,8 +5,9 @@ from core.admin_logger import log_what_admin_does
 from core.payments import PaymentService, get_payment_service
 from core.vehicles import Vehicle
 from schemas.driver import DriverOut, DriverUpdateAccountStatus
-from schemas.driver_document import DocumentStatus, DriverDocumentUpdateStatus
+from schemas.driver_document import DocumentStatus, DriverDocumentUpdateStatus, DocumentType, DriverDocumentsByUser
 from schemas.background_check import BackgroundStatus
+from schemas.background_provider import BackgroundProviderPayload
 from schemas.place import Location
 from schemas.response_schema import APIResponse
 from schemas.ride import RideBase, RideCreate, RideOut, RideUpdate
@@ -43,8 +44,8 @@ from services.driver_service import (
     update_driver_by_id_admin_func,
     
 )
-from services.driver_document_service import set_driver_document_status
-from services.background_check_service import record_background_result
+from services.driver_document_service import set_driver_document_status, list_pending_documents_grouped_by_driver
+from services.background_check_service import record_background_result, list_background_checks, auto_link_documents_to_background
 from services.audit_log_service import record_audit_event
 from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_place_details
 from services.ride_service import add_ride, add_ride_admin_func, retrieve_ride_by_ride_id, retrieve_rides_by_driver_id, retrieve_rides_by_user_id,update_ride_by_id_admin_func
@@ -343,6 +344,12 @@ async def review_driver_document(
     """
     update = DriverDocumentUpdateStatus(status=status, reason=reason)
     updated = await set_driver_document_status(docId, update)
+    # auto-link to background when approved
+    if status == DocumentStatus.APPROVED:
+        try:
+            await auto_link_documents_to_background(driverId)
+        except Exception:
+            pass
     await record_audit_event(
         actor_id=token.get("userId"),
         actor_type="admin",
@@ -352,6 +359,18 @@ async def review_driver_document(
         metadata={"status": status, "driverId": driverId, "reason": reason},
     )
     return APIResponse(status_code=200, data={"document": updated}, detail="Document status updated")
+
+
+@router.get(
+    "/driver-documents/pending",
+    response_model=APIResponse[List[DriverDocumentsByUser]],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+)
+async def list_pending_driver_documents_by_type(
+    documentType: DocumentType = Query(...),
+):
+    grouped = await list_pending_documents_grouped_by_driver(documentType)
+    return APIResponse(status_code=200, data=grouped, detail="Pending documents fetched")
 
 
 @router.patch(
@@ -378,6 +397,43 @@ async def update_background_check(
         metadata={"status": status, "referenceId": referenceId, "notes": notes},
     )
     return APIResponse(status_code=200, data={"background": updated}, detail="Background check updated")
+
+
+@router.post(
+    "/driver/{driverId}/background/provider",
+    response_model=APIResponse[dict],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+)
+async def ingest_background_check_from_provider(
+    driverId: str,
+    payload: BackgroundProviderPayload,
+    token: accessTokenOut = Depends(verify_admin_token),
+):
+    updated = await record_background_result(
+        driver_id=driverId,
+        status=payload.status,
+        notes=payload.notes,
+        reference=payload.referenceId,
+    )
+    await record_audit_event(
+        actor_id=token.get("userId"),
+        actor_type="admin",
+        action="background_provider_update",
+        target_type="driver",
+        target_id=driverId,
+        metadata={"provider": payload.provider, "raw": payload.raw},
+    )
+    return APIResponse(status_code=200, data={"background": updated}, detail="Background provider update applied")
+
+
+@router.get(
+    "/background-checks",
+    response_model=APIResponse[list],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+)
+async def list_all_background_checks():
+    checks = await list_background_checks()
+    return APIResponse(status_code=200, data=checks, detail="Background checks fetched")
     
 # --------------------------------------------------
 # --------------- RIDER MANAGEMENT -----------------

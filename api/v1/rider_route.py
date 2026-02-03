@@ -403,11 +403,11 @@ async def update_rider_password_while_logged_in(rider_details:RiderUpdatePasswor
 @router.post("/password-reset/request",response_model=APIResponse[ResetPasswordInitiationResponse] )
 async def start_password_reset_process_for_rider_that_forgot_password(rider_details:ResetPasswordInitiation):
     driver =  await rider_reset_password_initiation(rider_details=rider_details)   
-    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+    return APIResponse(data = driver,status_code=200,detail="Successfully Sent OTP")
 
 
 
 @router.patch("/password-reset/confirm")
 async def finish_password_reset_process_for_rider_that_forgot_password(rider_details:ResetPasswordConclusion):
     driver =  await rider_reset_password_conclusion(rider_details)
-    return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+    return APIResponse(data = driver,status_code=200,detail="Successfully updated password")

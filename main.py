@@ -514,6 +514,7 @@ from api.v1.driver import router as v1_driver_router
 from api.v1.rider_route import router as v1_rider_route_router
 from api.v1.payment import router as v1_payment_router
 from api.v1.sse import router as v1_sse_router
+from api.v1.quarantine import router as v1_quarantine_router
 
 
 app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=True)
@@ -521,6 +522,7 @@ app.include_router(v1_driver_router, prefix='/api/v1')
 app.include_router(v1_rider_route_router, prefix='/api/v1')
 app.include_router(v1_payment_router, prefix='/api/v1',include_in_schema=False)
 app.include_router(v1_sse_router, prefix='/api/v1')
+app.include_router(v1_quarantine_router, prefix='/api/v1')
 # --- auto-routes-end ---
 
 

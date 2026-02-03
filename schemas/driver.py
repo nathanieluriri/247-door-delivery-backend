@@ -45,17 +45,38 @@ class DriverRefresh(BaseModel):
         serialization_alias="refreshToken",
     )
     pass
-
-class DriverUpdate(BaseModel):
+class DriverUpdateProfile(BaseModel):
     # Add other fields here 
     firstName: Optional[str] = None
     lastName: Optional[str] = None
     
+class DriverUpdate(BaseModel):
+    # Add other fields here 
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    stripeAccountId: Optional[str] = None
+    payoutsEnabled: Optional[bool] = None
+    chargesEnabled: Optional[bool] = None
+    detailsSubmitted: Optional[bool] = None
+    requirementsCurrentlyDue: Optional[List[str]] = None
+    requirementsEventuallyDue: Optional[List[str]] = None
+    requirementsPendingVerification: Optional[List[str]] = None
+    onboardingRefreshUrl: Optional[str] = None
+    onboardingReturnUrl: Optional[str] = None
+    accountStatus:Optional[AccountStatus]=None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
 class DriverUpdateStripeAccountId(BaseModel):
     # Add other fields here 
     stripeAccountId: Optional[str] = None
+    payoutsEnabled: Optional[bool] = None
+    chargesEnabled: Optional[bool] = None
+    detailsSubmitted: Optional[bool] = None
+    requirementsCurrentlyDue: Optional[List[str]] = None
+    requirementsEventuallyDue: Optional[List[str]] = None
+    requirementsPendingVerification: Optional[List[str]] = None
+    onboardingRefreshUrl: Optional[str] = None
+    onboardingReturnUrl: Optional[str] = None
     
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
@@ -83,6 +104,14 @@ class DriverOut(DriverBase):
     firstName:Optional[str]=''
     lastName:Optional[str]=''     
     stripeAccountId: Optional[str] = None
+    payoutsEnabled: Optional[bool] = None
+    chargesEnabled: Optional[bool] = None
+    detailsSubmitted: Optional[bool] = None
+    requirementsCurrentlyDue: Optional[List[str]] = None
+    requirementsEventuallyDue: Optional[List[str]] = None
+    requirementsPendingVerification: Optional[List[str]] = None
+    onboardingRefreshUrl: Optional[str] = None
+    onboardingReturnUrl: Optional[str] = None
     vehicleType: Optional[VehicleType] = None
     vehicleMake: Optional[str] = None
     vehicleModel: Optional[str] = None

@@ -32,6 +32,8 @@ class DriverDocumentCreate(BaseModel):
     mimeType: Optional[str] = None
     storageProvider: str = "local"
     signedUrl: Optional[str] = None
+    sha256: Optional[str] = None
+    md5: Optional[str] = None
     status: DocumentStatus = DocumentStatus.PENDING
     metadata: Dict[str, Any] = Field(default_factory=dict)
     uploadedAt: int = Field(default_factory=lambda: int(time.time()))
@@ -55,3 +57,8 @@ class DriverDocumentOut(DriverDocumentCreate):
         if doc and "_id" in doc and isinstance(doc["_id"], ObjectId):
             doc["_id"] = str(doc["_id"])
         return cls.model_validate(doc)
+
+
+class DriverDocumentsByUser(BaseModel):
+    driverId: str
+    documents: list[DriverDocumentOut]

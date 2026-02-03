@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from core.redis_cache import async_redis
 from core.metrics import sse_backlog
-from schemas.sse import SSEEvent, RideStatusUpdate, ChatMessageEvent, RideRequestEvent
+from schemas.sse import SSEEvent, RideStatusUpdate, ChatMessageEvent, RideRequestEvent, SSEEventType
 
 
 RETRY_AFTER_SECONDS = int(os.getenv("SSE_RETRY_AFTER_SECONDS", "5"))
@@ -163,7 +163,7 @@ async def stream_events(
     request: Request,
     user_type: str,
     user_id: str,
-    event_types: Optional[Iterable[str]] = None,
+    event_types: Optional[Iterable[str | SSEEventType]] = None,
     ride_id: Optional[str] = None,
 ):
     await register_subscriber(user_type, user_id)
@@ -175,7 +175,13 @@ async def stream_events(
         await async_redis.set(active_key, session_id, ex=EVENT_TTL_SECONDS)
 
     pending_key = _pending_key(user_type, user_id)
-    allowed_types = set(event_types) if event_types else None
+    if event_types:
+        allowed_types = {
+            event_type.value if isinstance(event_type, SSEEventType) else event_type
+            for event_type in event_types
+        }
+    else:
+        allowed_types = None
 
     try:
         while True:

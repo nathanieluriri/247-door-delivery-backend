@@ -24,5 +24,6 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
                 "ride_id": path_params.get("ride_id") or path_params.get("rideId"),
                 "driver_id": path_params.get("driver_id") or path_params.get("driverId"),
                 "rider_id": path_params.get("rider_id") or path_params.get("riderId"),
+                "request_id": request.headers.get("x-request-id"),
             }
             logger.info("request", extra=log_payload)

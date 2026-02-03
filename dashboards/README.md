@@ -1,0 +1,1 @@
+This folder contains dashboard assets. `observability.json` is a starter Grafana dashboard; import it and update data source to Prometheus. Panels included: payment failures, match time p95, driver accepts rate, SSE backlog p95, scheduler heartbeat freshness.

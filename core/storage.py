@@ -20,6 +20,9 @@ import uuid
 import hashlib
 from typing import Optional, Tuple
 
+from core.antivirus import scan_bytes
+from core.metrics import av_scan_failures, integrity_failures
+
 try:
     import boto3  # type: ignore
 except ImportError:  # pragma: no cover - optional
@@ -32,10 +35,12 @@ SIGNED_URL_TTL = int(os.getenv("STORAGE_SIGNED_URL_TTL", "900"))
 
 
 class StoredObject:
-    def __init__(self, key: str, url: Optional[str] = None, provider: str = "local"):
+    def __init__(self, key: str, url: Optional[str] = None, provider: str = "local", sha256: str | None = None, md5: str | None = None):
         self.key = key
         self.url = url
         self.provider = provider
+        self.sha256 = sha256
+        self.md5 = md5
 
 
 def _ensure_dir(path: str):
@@ -58,6 +63,10 @@ def _hash_content(content: bytes) -> Tuple[str, str]:
 
 def store_file(driver_id: str, filename: str, content: bytes, content_type: Optional[str] = None) -> StoredObject:
     _virus_scan_stub(content)
+    clean, reason = scan_bytes(content)
+    if not clean:
+        av_scan_failures.inc()
+        raise ValueError(f"AV scan failed: {reason}")
     sha256, md5 = _hash_content(content)
     if STORAGE_BACKEND == "s3":
         if boto3 is None:
@@ -74,7 +83,7 @@ def store_file(driver_id: str, filename: str, content: bytes, content_type: Opti
             Params={"Bucket": bucket, "Key": key},
             ExpiresIn=SIGNED_URL_TTL,
         )
-        return StoredObject(key=key, url=url, provider="s3")
+        return StoredObject(key=key, url=url, provider="s3", sha256=sha256, md5=md5)
 
     # local backend
     driver_dir = os.path.join(LOCAL_ROOT, driver_id)
@@ -83,7 +92,7 @@ def store_file(driver_id: str, filename: str, content: bytes, content_type: Opti
     path = os.path.join(driver_dir, safe_name)
     with open(path, "wb") as f:
         f.write(content)
-    return StoredObject(key=path, url=None, provider="local")
+    return StoredObject(key=path, url=None, provider="local", sha256=sha256, md5=md5)
 
 
 def get_signed_url(key: str) -> Optional[str]:
@@ -98,3 +107,50 @@ def get_signed_url(key: str) -> Optional[str]:
         Params={"Bucket": bucket, "Key": key},
         ExpiresIn=SIGNED_URL_TTL,
     )
+
+
+def verify_integrity(key: str, expected_sha256: Optional[str]) -> bool:
+    if not expected_sha256:
+        return False
+    if STORAGE_BACKEND == "s3" and boto3 is not None and not key.startswith("/"):
+        bucket = os.environ["STORAGE_S3_BUCKET"]
+        region = os.getenv("STORAGE_S3_REGION")
+        endpoint = os.getenv("STORAGE_S3_ENDPOINT")
+        s3 = boto3.client("s3", region_name=region, endpoint_url=endpoint)
+        meta = s3.head_object(Bucket=bucket, Key=key)
+        stored = meta.get("Metadata", {}).get("sha256")
+        return stored == expected_sha256
+    # local path
+    if os.path.exists(key):
+        with open(key, "rb") as f:
+            data = f.read()
+        sha256, _ = _hash_content(data)
+        ok = sha256 == expected_sha256
+        if not ok:
+            integrity_failures.inc()
+        return ok
+    integrity_failures.inc()
+    return False
+
+
+def quarantine_file(driver_id: str, filename: str, content: bytes, content_type: Optional[str] = None) -> StoredObject:
+    """Save infected files to a quarantine location/prefix."""
+    if STORAGE_BACKEND == "s3":
+        if boto3 is None:
+            raise RuntimeError("boto3 not installed; cannot use s3 storage backend")
+        bucket = os.environ["STORAGE_S3_BUCKET"]
+        region = os.getenv("STORAGE_S3_REGION")
+        endpoint = os.getenv("STORAGE_S3_ENDPOINT")
+        s3 = boto3.client("s3", region_name=region, endpoint_url=endpoint)
+        key = f"quarantine/{driver_id}/{uuid.uuid4().hex}-{filename}"
+        extra = {"ContentType": content_type} if content_type else {}
+        s3.put_object(Bucket=bucket, Key=key, Body=content, Metadata={"reason": "virus"}, **extra)
+        return StoredObject(key=key, provider="s3")
+    # local
+    q_dir = os.path.join(LOCAL_ROOT, "quarantine", driver_id)
+    _ensure_dir(q_dir)
+    safe_name = f"{uuid.uuid4().hex}-{filename}"
+    path = os.path.join(q_dir, safe_name)
+    with open(path, "wb") as f:
+        f.write(content)
+    return StoredObject(key=path, provider="local")

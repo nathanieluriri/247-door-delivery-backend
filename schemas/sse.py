@@ -1,3 +1,4 @@
+from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,12 @@ class SSEEvent(BaseModel):
     created_at: int = Field(..., alias="createdAt")
 
     model_config = {"populate_by_name": True}
+
+
+class SSEEventType(str, Enum):
+    ride_request = "ride_request"
+    ride_status_update = "ride_status_update"
+    chat_message = "chat_message"
 
 
 class SSEAck(BaseModel):

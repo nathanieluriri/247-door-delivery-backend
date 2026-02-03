@@ -3,12 +3,14 @@ import os
 from urllib.parse import urlencode
 from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path, Depends, UploadFile, File, Form
 from typing import List, Optional
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
 from core.staff_payment import get_staff_payment_service
 from schemas.tokens_schema import accessTokenOut
+from schemas.storage_upload import CloudflareUploadResponse
 from schemas.payout import (
     PayoutCreate,
     PayoutOut,
@@ -17,7 +19,7 @@ from schemas.payout import (
     PayoutBalanceOut,
     PayoutRequestIn,
 )
-from repositories.tokens_repo import delete_access_token, delete_refresh_tokens_by_previous_access_token
+from repositories.tokens_repo import delete_access_token, delete_refresh_tokens_by_previous_access_token, get_access_tokens
 from services.payout_service import (
     add_payout,
     remove_payout,
@@ -34,10 +36,11 @@ from schemas.driver import (
     DriverRefresh,
     DriverUpdatePassword,
     DriverLocationUpdate,
+    DriverUpdateProfile,
     DriverVehicleUpdate,
 )
 from schemas.ride import RideUpdate
-from schemas.driver_document import DriverDocumentCreate, DriverDocumentOut, DocumentType
+from schemas.driver_document import DriverDocumentCreate, DriverDocumentOut, DocumentType, DocumentStatus
 from security.account_status_checks import check_driver_account_status
 from services.driver_service import (
     add_driver,
@@ -58,17 +61,43 @@ from services.driver_service import (
 from services.driver_document_service import (
     store_driver_document,
     get_driver_documents,
+    retrieve_driver_document,
+    get_latest_document_for_driver,
 )
-from core.storage import store_file, get_signed_url
+from core.storage import store_file, get_signed_url, verify_integrity, quarantine_file
+from services.quarantine_service import log_quarantine_event
+from core.antivirus import scan_bytes
 from security.auth import verify_token_to_refresh, verify_token_driver_role
+from security.encrypting_jwt import decode_jwt_token
 from services.rating_service import add_rating, retrieve_rating_by_user_id
 from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
-from services.sse_service import stream_events
 
 
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
 SUCCESS_PAGE_URL = os.getenv("SUCCESS_PAGE_URL", "http://localhost:8080/success")
 ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
+MAX_CLOUDFLARE_UPLOAD_BYTES = 10 * 1024 * 1024
+optional_bearer_auth = HTTPBearer(auto_error=False)
+
+
+async def _get_optional_driver_token(
+    creds: Optional[HTTPAuthorizationCredentials],
+) -> Optional[accessTokenOut]:
+    if not creds:
+        return None
+    decoded_token = await decode_jwt_token(token=creds.credentials)  # type: ignore[arg-type]
+    if not decoded_token:
+        return None
+    access_token = decoded_token.get("access_token") or decoded_token.get("accessToken")
+    if not access_token:
+        return None
+    result = await get_access_tokens(accessToken=access_token)
+    if result is None:
+        return None
+    driver = await retrieve_driver_by_driver_id(id=result.userId)
+    if not driver:
+        return None
+    return result
 # --- Step 1: Redirect user to Google login ---
 @router.get("/google/auth")
 async def login(request: Request):
@@ -120,7 +149,7 @@ async def list_drivers(start:int= 0, stop:int=100):
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
-@router.get("/me", response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)],response_model_exclude_none=True)
+@router.get("/me", response_model_exclude={"data": {"password"}},response_model=APIResponse[DriverOut],dependencies=[Depends(verify_token_driver_role)],response_model_exclude_none=True)
 async def get_driver_details(token:accessTokenOut = Depends(verify_token_driver_role)):
  
     try:
@@ -157,7 +186,7 @@ async def refresh_driver_tokens(user_data:DriverRefresh,token:accessTokenOut = D
 
 
 @router.patch("/profile",dependencies=[Depends(verify_token_driver_role),Depends(check_driver_account_status)])
-async def update_driver_profile(driver_details:DriverUpdate,token:accessTokenOut = Depends(verify_token_driver_role)):
+async def update_driver_profile(driver_details:DriverUpdateProfile,token:accessTokenOut = Depends(verify_token_driver_role)):
     driver =  await update_driver_by_id(driver_id=token.userId,driver_data=driver_details)
     return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
      
@@ -181,6 +210,43 @@ async def update_driver_vehicle_details(
     return APIResponse(status_code=200, data=driver, detail="Vehicle details updated")
 
 
+@router.get("/vehicle", response_model=APIResponse[dict], response_model_exclude_none=True)
+async def get_driver_vehicle_info(
+    driver_id: Optional[str] = Query(default=None),
+    token: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer_auth),
+):
+    resolved_driver_id = driver_id
+    if not resolved_driver_id:
+        token_data = await _get_optional_driver_token(token)
+        if token_data:
+            resolved_driver_id = token_data.userId
+
+    if not resolved_driver_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="driver_id is required when not authenticated as a driver",
+        )
+
+    driver = await retrieve_driver_by_driver_id(id=resolved_driver_id)
+    if not driver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Driver not found",
+        )
+
+    vehicle_info = {
+        "driverId": driver.id,
+        "vehicleType": driver.vehicleType,
+        "vehicleMake": driver.vehicleMake,
+        "vehicleModel": driver.vehicleModel,
+        "vehicleColor": driver.vehicleColor,
+        "vehiclePlateNumber": driver.vehiclePlateNumber,
+        "vehicleYear": driver.vehicleYear,
+    }
+
+    return APIResponse(status_code=200, data=vehicle_info, detail="Vehicle info retrieved")
+
+
 # ---------------------------------
 # ------- DOCUMENT UPLOAD ---------
 # ---------------------------------
@@ -200,7 +266,28 @@ async def upload_driver_document(
     Upload a driver compliance document. Storage backend is configurable
     (local or S3) and metadata is persisted in Mongo.
     """
+    existing = await get_latest_document_for_driver(
+        driver_id=token.userId,
+        document_type=documentType,
+        statuses=[DocumentStatus.PENDING, DocumentStatus.APPROVED],
+    )
+    if existing:
+        if getattr(existing, "storageProvider", None) == "s3":
+            existing.signedUrl = get_signed_url(existing.fileKey)
+        return APIResponse(
+            status_code=200,
+            data=existing,
+            detail="Document already uploaded; pending or approved documents must be reviewed before re-upload.",
+        )
+
     content = await file.read()
+
+    clean, reason = scan_bytes(content)
+    if not clean:
+        quarantined = quarantine_file(token.userId, file.filename, content, file.content_type)
+        await log_quarantine_event(token.userId, quarantined.key, reason)
+        raise HTTPException(status_code=400, detail=f"Infected file detected: {reason}")
+
     stored = store_file(
         driver_id=token.userId,
         filename=file.filename,
@@ -217,9 +304,54 @@ async def upload_driver_document(
         mimeType=file.content_type,
         storageProvider=stored.provider,
         signedUrl=signed_url,
+        sha256=stored.sha256,
+        md5=stored.md5,
     )
     created = await store_driver_document(doc)
     return APIResponse(status_code=200, data=created, detail="Document uploaded")
+
+
+@router.post(
+    "/uploads/cloudflare",
+    response_model=APIResponse[CloudflareUploadResponse],
+    dependencies=[Depends(verify_token_driver_role), Depends(check_driver_account_status)],
+)
+async def upload_driver_file_to_cloudflare(
+    file: UploadFile = File(...),
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    if os.getenv("STORAGE_BACKEND", "local").lower() != "s3":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cloudflare upload requires STORAGE_BACKEND=s3",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_CLOUDFLARE_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File too large. Max size is 10MB.",
+        )
+
+    stored = store_file(
+        driver_id=token.userId,
+        filename=file.filename,
+        content=content,
+        content_type=file.content_type,
+    )
+    signed_url = stored.url or get_signed_url(stored.key)
+
+    payload = CloudflareUploadResponse(
+        key=stored.key,
+        provider=stored.provider,
+        signedUrl=signed_url,
+        sha256=stored.sha256,
+        md5=stored.md5,
+        sizeBytes=len(content),
+        contentType=file.content_type,
+        filename=file.filename,
+    )
+    return APIResponse(status_code=200, data=payload, detail="File uploaded to Cloudflare")
 
 
 @router.get(
@@ -233,6 +365,19 @@ async def list_my_documents(token: accessTokenOut = Depends(verify_token_driver_
         if getattr(d, "storageProvider", None) == "s3":
             d.signedUrl = get_signed_url(d.fileKey)
     return APIResponse(status_code=200, data=docs, detail="Documents fetched")
+
+
+@router.get(
+    "/documents/{docId}/verify",
+    response_model=APIResponse[bool],
+    dependencies=[Depends(verify_token_driver_role)],
+)
+async def verify_document_integrity(docId: str, token: accessTokenOut = Depends(verify_token_driver_role)):
+    doc = await retrieve_driver_document(docId)
+    if not doc or doc.driverId != token.userId:
+        raise HTTPException(status_code=404, detail="Document not found")
+    ok = verify_integrity(doc.fileKey, doc.sha256)
+    return APIResponse(status_code=200, data=ok, detail="Integrity verified" if ok else "Integrity check failed")
 
 
 
@@ -692,73 +837,3 @@ async def record_ride_earnings(
 
 
 
-@router.get(
-    "/ride/events",
-    response_model_exclude={"data": {"password"}},
-    
-    dependencies=[Depends(verify_token_driver_role)],
-    summary="Subscribe to ride events for drivers",
-    description=(
-        "Establishes a Server-Sent Events (SSE) connection for the authenticated driver. "
-        "The driver will receive both global ride notifications and private notifications "
-        "targeted specifically to them."
-    )
-)
-async def subscribe_to_general_ride_events_to_be_able_accept_rides_once_they_are_available(
-    request: Request,
-    token: accessTokenOut = Depends(verify_token_driver_role),
-):
-    """
-    SSE endpoint for drivers to receive ride notifications.
-
-    Events are re-sent until acknowledged via the SSE ack endpoint.
-    """
-    return StreamingResponse(
-        stream_events(
-            request=request,
-            user_type="driver",
-            user_id=token.userId,
-        ),
-        media_type="text/event-stream",
-    )
-    
-@router.get(
-    "/ride/{ride_id}/monitor",
-    response_model_exclude={"data": {"password"}},
-    dependencies=[Depends(verify_token_driver_role)],
-    summary="Subscribe to active ride lifecycle events",
-    description=(
-        "Establishes a dedicated SSE connection for a specific ongoing ride. "
-        "Used by drivers to receive critical real-time updates such as passenger "
-        "cancellations, route changes, chat messages, or payment confirmations "
-        "for the current trip."
-    )
-)
-async def subscribe_to_specific_ride_lifecycle_events_for_active_navigation_and_status(
-    ride_id: str,
-    request: Request,
-    token: accessTokenOut = Depends(verify_token_driver_role),
-):
-    """
-    SSE endpoint for monitoring a specific active ride.
-
-    Events are re-sent until acknowledged via the SSE ack endpoint.
-    """
-    
-    ride = await retrieve_ride_by_ride_id(id=ride_id)
-    if not ride or ride.driverId != token.userId:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ride access denied",
-        )
-
-    return StreamingResponse(
-        stream_events(
-            request=request,
-            user_type="driver",
-            user_id=token.userId,
-            event_types=["ride_status_update", "chat_message"],
-            ride_id=ride_id,
-        ),
-        media_type="text/event-stream",
-    )

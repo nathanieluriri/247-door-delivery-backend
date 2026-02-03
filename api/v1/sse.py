@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from schemas.response_schema import APIResponse
-from schemas.sse import SSEAck
+from schemas.sse import SSEAck, SSEEventType
 from schemas.tokens_schema import accessTokenOut
 from security.auth import verify_token_driver_role, verify_token_rider_role
 from services.sse_service import ack_event, stream_events
@@ -17,15 +17,16 @@ router = APIRouter(prefix="/sse", tags=["SSE"])
 async def stream_driver_events(
     request: Request,
     ride_id: Optional[str] = Query(default=None),
-    event_types: Optional[List[str]] = Query(default=None),
+    event_types: Optional[List[SSEEventType]] = Query(default=None),
     token: accessTokenOut = Depends(verify_token_driver_role),
 ):
+    allowed_types = [event_type.value for event_type in event_types] if event_types else None
     return StreamingResponse(
         stream_events(
             request=request,
             user_type="driver",
             user_id=token.userId,
-            event_types=event_types,
+            event_types=allowed_types,
             ride_id=ride_id,
         ),
         media_type="text/event-stream",
@@ -36,15 +37,16 @@ async def stream_driver_events(
 async def stream_rider_events(
     request: Request,
     ride_id: Optional[str] = Query(default=None),
-    event_types: Optional[List[str]] = Query(default=None),
+    event_types: Optional[List[SSEEventType]] = Query(default=None),
     token: accessTokenOut = Depends(verify_token_rider_role),
 ):
+    allowed_types = [event_type.value for event_type in event_types] if event_types else None
     return StreamingResponse(
         stream_events(
             request=request,
             user_type="rider",
             user_id=token.userId,
-            event_types=event_types,
+            event_types=allowed_types,
             ride_id=ride_id,
         ),
         media_type="text/event-stream",

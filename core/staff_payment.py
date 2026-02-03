@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 import stripe
 
-from schemas.driver import DriverOut, DriverUpdate
+from schemas.driver import DriverOut, DriverUpdate, DriverUpdateStripeAccountId
+from schemas.imports import AccountStatus
 from schemas.stripe_event import StripeEventCreate
 from services.stripe_event_service import retrieve_stripe_event_by_stripe_event_id
 from dotenv import load_dotenv
@@ -350,10 +351,22 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
             # Update driver's payout eligibility in our system
             account_data = event["data"]["object"]
 
+            requirements = account_data.get("requirements", {}) or {}
+            currently_due = requirements.get("currently_due")
+            is_onboarding_complete = (
+                account_data.get("details_submitted") is True
+                and account_data.get("payouts_enabled") is True
+                and (not currently_due)
+            )
             driver_update = DriverUpdate(
                 stripeAccountId=account_id,
                 payoutsEnabled=account_data.get("payouts_enabled", False),
-                detailsSubmitted=account_data.get("details_submitted", False)
+                chargesEnabled=account_data.get("charges_enabled", False),
+                detailsSubmitted=account_data.get("details_submitted", False),
+                requirementsCurrentlyDue=currently_due,
+                requirementsEventuallyDue=requirements.get("eventually_due"),
+                requirementsPendingVerification=requirements.get("pending_verification"),
+                accountStatus=AccountStatus.ACTIVE if is_onboarding_complete else None,
             )
 
             # Find driver by stripe account ID and update
@@ -367,7 +380,11 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
             driver_update = DriverUpdate(
                 stripeAccountId=None,  # Clear the account ID
                 payoutsEnabled=False,
-                detailsSubmitted=False
+                chargesEnabled=False,
+                detailsSubmitted=False,
+                requirementsCurrentlyDue=None,
+                requirementsEventuallyDue=None,
+                requirementsPendingVerification=None,
             )
 
             from services.driver_service import update_driver_by_stripe_account_id
@@ -411,7 +428,7 @@ class StaffPaymentService:
             account_result = await self.provider.create_connect_account(driver)
 
             # Update driver with stripe account ID
-            driver_update = DriverUpdate(stripeAccountId=account_result["stripe_account_id"])
+            driver_update = DriverUpdateStripeAccountId(stripeAccountId=account_result["stripe_account_id"])
             from services.driver_service import update_driver_by_id
             await update_driver_by_id(driver.id, driver_update)
 
@@ -424,6 +441,29 @@ class StaffPaymentService:
 
         # Check current eligibility
         eligibility = await self.provider.check_payout_eligibility(stripe_account_id)
+
+        # Persist Stripe onboarding + eligibility snapshot on driver
+        requirements = eligibility.get("requirements", {}) or {}
+        currently_due = requirements.get("currently_due")
+        is_onboarding_complete = (
+            eligibility.get("details_submitted") is True
+            and eligibility.get("payouts_enabled") is True
+            and (not currently_due)
+        )
+        driver_update = DriverUpdate(
+            stripeAccountId=stripe_account_id,
+            payoutsEnabled=eligibility.get("payouts_enabled"),
+            chargesEnabled=eligibility.get("charges_enabled"),
+            detailsSubmitted=eligibility.get("details_submitted"),
+            requirementsCurrentlyDue=currently_due,
+            requirementsEventuallyDue=requirements.get("eventually_due"),
+            requirementsPendingVerification=requirements.get("pending_verification"),
+            onboardingRefreshUrl=self.provider.refresh_url,
+            onboardingReturnUrl=self.provider.return_url,
+            accountStatus=AccountStatus.ACTIVE if is_onboarding_complete else None,
+        )
+        from services.driver_service import update_driver_by_id
+        await update_driver_by_id(driver.id, driver_update)
 
         return {
             "stripe_account_id": stripe_account_id,

@@ -26,3 +26,13 @@ sse_backlog = Histogram(
     "Pending SSE events length sampled",
     buckets=(0, 1, 5, 10, 20, 50, 100, 200),
 )
+
+av_scan_failures = Counter(
+    "storage_av_scan_failures_total",
+    "Count of AV scan failures",
+)
+
+integrity_failures = Counter(
+    "storage_integrity_failures_total",
+    "Count of integrity verification failures",
+)

@@ -1,0 +1,10 @@
+{
+  "title": "Ride Platform Observability",
+  "panels": [
+    {"type": "stat", "title": "Payment Failures (10m)", "expr": "increase(ride_payment_failures_total[10m])"},
+    {"type": "heatmap", "title": "Match Time", "expr": "histogram_quantile(0.95, rate(ride_match_time_seconds_bucket[5m]))"},
+    {"type": "stat", "title": "Driver Accepts", "expr": "rate(ride_driver_accepts_total[5m])"},
+    {"type": "heatmap", "title": "SSE Backlog", "expr": "histogram_quantile(0.95, rate(ride_sse_pending_events_bucket[5m]))"},
+    {"type": "stat", "title": "Scheduler Heartbeat Fresh", "expr": "apscheduler_heartbeat_fresh"}
+  ]
+}

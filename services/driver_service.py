@@ -10,7 +10,7 @@ import os
 from bson import ObjectId
 from fastapi import HTTPException
 from bson.errors import InvalidId
-from typing import List
+from typing import List, Union
 
 from repositories.reset_token import(
     create_reset_token,
@@ -39,6 +39,7 @@ from schemas.driver import (
     DriverUpdatePassword,
     DriverUpdateAccountStatus,
     DriverLocationUpdate,
+    DriverUpdateProfile,
     DriverVehicleUpdate,
 )
 from schemas.imports import ALLOWED_ACCOUNT_STATUS_TRANSITIONS, AccountStatus, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse
@@ -181,7 +182,7 @@ async def refresh_driver_tokens_reduce_number_of_logins(user_refresh_data:Driver
   
     raise HTTPException(status_code=404,detail="Invalid refresh token ")  
 
-async def update_driver_by_id(driver_id: str, driver_data: DriverUpdate,is_password_getting_changed:bool=False) -> DriverOut:
+async def update_driver_by_id(driver_id: str, driver_data: Union[DriverUpdate,DriverUpdateProfile],is_password_getting_changed:bool=False) -> DriverOut:
     """updates an entry of driver in the database
 
     Raises:
@@ -323,6 +324,26 @@ async def update_driver_by_id_admin_func(
             status_code=404, detail="Driver not found or update failed"
         )
 
+    return result
+
+async def update_driver_by_stripe_account_id(stripe_account_id: str, driver_data: DriverUpdate) -> DriverOut:
+    """updates a driver by Stripe account ID in the database
+
+    Raises:
+        HTTPException 404(not found): if Driver not found or update failed
+        HTTPException 400(not found): Invalid Stripe account ID format
+
+    Returns:
+        _type_: DriverOut
+    """
+    if not stripe_account_id:
+        raise HTTPException(status_code=400, detail="Invalid Stripe account ID format")
+
+    filter_dict = {"stripeAccountId": stripe_account_id}
+    result = await update_driver(filter_dict, driver_data)
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Driver not found or update failed")
     return result
 
 

@@ -35,3 +35,4 @@ prometheus-fastapi-instrumentator
 fakeredis
 pytest
 prometheus-client
+clamd
