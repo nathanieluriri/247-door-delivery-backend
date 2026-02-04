@@ -9,6 +9,7 @@ from repositories.driver_document_repo import (
     get_driver_document,
     get_latest_driver_document_by_type,
     list_pending_documents_by_type,
+    list_latest_documents_by_type,
 )
 from schemas.driver_document import (
     DriverDocumentCreate,
@@ -17,6 +18,8 @@ from schemas.driver_document import (
     DocumentStatus,
     DocumentType,
     DriverDocumentsByUser,
+    DocumentSortBy,
+    SortDirection,
 )
 
 
@@ -44,10 +47,17 @@ async def get_latest_document_for_driver(
 
 async def list_pending_documents_grouped_by_driver(
     document_type: DocumentType,
+    driver_id: str | None = None,
+    sort_by: DocumentSortBy = DocumentSortBy.uploadedAt,
+    sort_dir: SortDirection = SortDirection.desc,
 ) -> list[DriverDocumentsByUser]:
-    raw = await list_pending_documents_by_type(document_type)
+    raw = await list_pending_documents_by_type(document_type, driver_id, sort_by, sort_dir)
     grouped: list[DriverDocumentsByUser] = []
     for item in raw:
         docs = [DriverDocumentOut.model_validate_db(doc) for doc in item.get("documents", [])]
         grouped.append(DriverDocumentsByUser(driverId=item.get("_id"), documents=docs))
     return grouped
+
+
+async def list_latest_documents_for_driver(driver_id: str) -> list[DriverDocumentOut]:
+    return await list_latest_documents_by_type(driver_id)

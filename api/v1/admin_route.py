@@ -5,7 +5,7 @@ from core.admin_logger import log_what_admin_does
 from core.payments import PaymentService, get_payment_service
 from core.vehicles import Vehicle
 from schemas.driver import DriverOut, DriverUpdateAccountStatus
-from schemas.driver_document import DocumentStatus, DriverDocumentUpdateStatus, DocumentType, DriverDocumentsByUser
+from schemas.driver_document import DocumentStatus, DriverDocumentUpdateStatus, DocumentType, DriverDocumentsByUser, DocumentSortBy, SortDirection
 from schemas.background_check import BackgroundStatus
 from schemas.background_provider import BackgroundProviderPayload
 from schemas.place import Location
@@ -368,8 +368,11 @@ async def review_driver_document(
 )
 async def list_pending_driver_documents_by_type(
     documentType: DocumentType = Query(...),
+    driverId: str | None = Query(default=None),
+    sortBy: DocumentSortBy = Query(default=DocumentSortBy.uploadedAt),
+    sortDir: SortDirection = Query(default=SortDirection.desc),
 ):
-    grouped = await list_pending_documents_grouped_by_driver(documentType)
+    grouped = await list_pending_documents_grouped_by_driver(documentType, driverId, sortBy, sortDir)
     return APIResponse(status_code=200, data=grouped, detail="Pending documents fetched")
 
 

@@ -63,6 +63,7 @@ from services.driver_document_service import (
     get_driver_documents,
     retrieve_driver_document,
     get_latest_document_for_driver,
+    list_latest_documents_for_driver,
 )
 from core.storage import store_file, get_signed_url, verify_integrity, quarantine_file
 from services.quarantine_service import log_quarantine_event
@@ -365,6 +366,19 @@ async def list_my_documents(token: accessTokenOut = Depends(verify_token_driver_
         if getattr(d, "storageProvider", None) == "s3":
             d.signedUrl = get_signed_url(d.fileKey)
     return APIResponse(status_code=200, data=docs, detail="Documents fetched")
+
+
+@router.get(
+    "/documents/latest",
+    response_model=APIResponse[List[DriverDocumentOut]],
+    dependencies=[Depends(verify_token_driver_role)],
+)
+async def list_my_latest_documents_by_type(token: accessTokenOut = Depends(verify_token_driver_role)):
+    docs = await list_latest_documents_for_driver(driver_id=token.userId)
+    for d in docs:
+        if getattr(d, "storageProvider", None) == "s3":
+            d.signedUrl = get_signed_url(d.fileKey)
+    return APIResponse(status_code=200, data=docs, detail="Latest documents fetched")
 
 
 @router.get(

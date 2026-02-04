@@ -13,6 +13,8 @@ from schemas.driver_document import (
     DriverDocumentUpdateStatus,
     DocumentStatus,
     DocumentType,
+    DocumentSortBy,
+    SortDirection,
 )
 
 
@@ -71,10 +73,19 @@ async def get_latest_driver_document_by_type(
     return DriverDocumentOut.model_validate_db(doc)
 
 
-async def list_pending_documents_by_type(document_type: DocumentType) -> list[dict]:
+async def list_pending_documents_by_type(
+    document_type: DocumentType,
+    driver_id: str | None = None,
+    sort_by: DocumentSortBy = DocumentSortBy.uploadedAt,
+    sort_dir: SortDirection = SortDirection.desc,
+) -> list[dict]:
+    match = {"documentType": document_type, "status": DocumentStatus.PENDING}
+    if driver_id:
+        match["driverId"] = driver_id
+    sort_dir_value = -1 if sort_dir == SortDirection.desc else 1
     pipeline = [
-        {"$match": {"documentType": document_type, "status": DocumentStatus.PENDING}},
-        {"$sort": {"uploadedAt": -1}},
+        {"$match": match},
+        {"$sort": {sort_by.value: sort_dir_value}},
         {
             "$group": {
                 "_id": "$driverId",
@@ -87,3 +98,22 @@ async def list_pending_documents_by_type(document_type: DocumentType) -> list[di
     async for item in cursor:
         results.append(item)
     return results
+
+
+async def list_latest_documents_by_type(driver_id: str) -> list[DriverDocumentOut]:
+    pipeline = [
+        {"$match": {"driverId": driver_id}},
+        {"$sort": {"uploadedAt": -1}},
+        {
+            "$group": {
+                "_id": "$documentType",
+                "doc": {"$first": "$$ROOT"},
+            }
+        },
+        {"$replaceRoot": {"newRoot": "$doc"}},
+    ]
+    cursor = db.driver_documents.aggregate(pipeline)
+    docs: list[DriverDocumentOut] = []
+    async for item in cursor:
+        docs.append(DriverDocumentOut.model_validate_db(item))
+    return docs

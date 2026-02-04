@@ -24,6 +24,15 @@ class DocumentType(str, Enum):
     BACKGROUND_CHECK = "background_check"
 
 
+class DocumentSortBy(str, Enum):
+    uploadedAt = "uploadedAt"
+
+
+class SortDirection(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+
 class DriverDocumentCreate(BaseModel):
     driverId: str
     documentType: DocumentType
