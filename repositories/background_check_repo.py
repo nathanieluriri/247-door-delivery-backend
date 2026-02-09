@@ -36,3 +36,11 @@ async def update_background_check(driver_id: str, update: BackgroundCheckUpdate)
     if not doc:
         raise HTTPException(status_code=404, detail="Background check not found")
     return BackgroundCheckOut.model_validate_db(doc)
+
+
+async def list_background_checks() -> list[BackgroundCheckOut]:
+    cursor = db.background_checks.find().sort("updatedAt", -1)
+    results: list[BackgroundCheckOut] = []
+    async for doc in cursor:
+        results.append(BackgroundCheckOut.model_validate_db(doc))
+    return results

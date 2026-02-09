@@ -10,6 +10,7 @@ from schemas.chat import (
     ChatBase,
     ChatUpdate,
 )
+from schemas.sse import ChatMessageEvent
 from security.encrypting_jwt import JWTPayload
 from services.chat_service import (
     add_chat,
@@ -22,6 +23,7 @@ from services.ride_service import retrieve_ride_by_ride_id
 # Assuming you have your redis instance and auth dependencies
 from security.auth import verify_token
 from services.sse_service import stream_events
+from schemas.imports import UserType
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
 
@@ -35,7 +37,13 @@ async def ensure_ride_membership(user: JWTPayload, ride_id: str) -> None:
 # ------------------------------
 # 1. Send Chat (Create & Broadcast)
 # ------------------------------
-@router.post("/", response_model=APIResponse[ChatOut], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=APIResponse[ChatOut],
+    status_code=status.HTTP_201_CREATED,
+    summary="Send a chat message",
+    description="Creates a chat message for a ride and broadcasts it to the ride channel.",
+)
 async def send_chat_message(
     payload: ChatBase, 
     user:JWTPayload=Depends(verify_token) # Ensure user is authenticated
@@ -44,11 +52,17 @@ async def send_chat_message(
     Sends a chat message. 
     1. Persists message to MongoDB (via service layer).
     2. Broadcasts message via Redis Pub/Sub to the specific ride channel.
+
+    Access: Rider or Driver involved in the ride (valid access token required).
     """
     # Create the chat object (includes timestamps, etc.)
     
     
-    new_data = ChatCreate(**payload.model_dump(),userType=user.user_type,userId=user.user_id)
+    new_data = ChatCreate(
+        **payload.model_dump(),
+        userType=UserType(user.user_type.lower()),
+        userId=user.user_id,
+    )
     await ensure_ride_membership(user, payload.rideId)
     
     # 1. Save to Database
@@ -65,7 +79,11 @@ async def send_chat_message(
 # ------------------------------
 # 2. Receive Chat Updates (SSE Stream)
 # ------------------------------
-@router.get("/stream/{ride_id}", summary="Stream chat messages for a ride")
+@router.get(
+    "/stream/{ride_id}",
+    summary="Stream chat messages for a ride",
+    description="Streams chat messages for a ride over Server-Sent Events.",
+)
 async def stream_chat_updates(
     ride_id: str,
     request: Request,
@@ -75,6 +93,8 @@ async def stream_chat_updates(
     SSE Endpoint for Riders and Drivers to receive real-time chat messages.
     - Connects to Redis channel: 'ride:{ride_id}:chat'
     - Yields new messages as they are published by the POST route.
+
+    Access: Rider or Driver involved in the ride (valid access token required).
     """
     await ensure_ride_membership(user, ride_id)
     return StreamingResponse(
@@ -93,20 +113,51 @@ async def stream_chat_updates(
 # ---------------------------------
 # Retrieve All Messages For Ride   
 # ---------------------------------
-@router.get("/{rideId}", response_model=APIResponse[List[ChatOut]])
+@router.get(
+    "/{rideId}",
+    response_model=APIResponse[List[ChatMessageEvent]],
+    summary="Get chat history for a ride",
+    description="Returns stored chat messages associated with a ride.",
+)
 async def get_message_by_id(rideId: str = Path(..., description="ride ID")):
+    """
+    Fetch stored chat messages for a ride ID.
+
+    Access: Public (no auth enforced).
+    """
     item = await retrieve_chat_by_chat_id(id=rideId)
     if not item:
         raise HTTPException(status_code=404, detail="Message not found")
-    return APIResponse(status_code=200, data=item, detail="Message fetched")
+    events = [
+        ChatMessageEvent(
+            chatId=chat.id,
+            rideId=chat.rideId,
+            senderId=chat.userId or "",
+            senderType=chat.userType,
+            message=chat.text,
+            timestamp=chat.date_created or chat.last_updated or 0,
+        )
+        for chat in item
+    ]
+    return APIResponse(status_code=200, data=events, detail="Message fetched")
 
 
 
 # ------------------------------
 # Delete Message
 # ------------------------------
-@router.delete("/{id}", response_model=APIResponse[None])
+@router.delete(
+    "/{id}",
+    response_model=APIResponse[None],
+    summary="Delete a chat message",
+    description="Deletes a chat message by its identifier.",
+)
 async def delete_message(id: str = Path(...)):
+    """
+    Delete a single chat message by its ID.
+
+    Access: Public (no auth enforced).
+    """
     deleted = await remove_chat(id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Message not found or deletion failed")

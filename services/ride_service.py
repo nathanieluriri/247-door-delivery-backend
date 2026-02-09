@@ -14,7 +14,7 @@ from core.scheduler import scheduler
 from fastapi import status
 from bson import ObjectId
 from fastapi import Depends, HTTPException
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta
 from datetime import timezone
 utc = timezone.utc
@@ -32,9 +32,45 @@ from repositories.ride import (
 )
 from schemas.imports import ALLOWED_RIDE_STATUS_TRANSITIONS, RIDE_REFUND_RULES, RideStatus
 from schemas.ride import RideCreate, RideUpdate, RideOut, RideShareLinkOut
+from services.driver_route_service import maybe_publish_driver_route_for_ride
 
 
 FRONTEND_SHARE_RIDE_URL = os.getenv("FRONTEND_SHARE_RIDE_URL", "http://localhost:8080/share/ride")
+
+
+def _ride_dispatch_job_id(ride_id: str) -> str:
+    return f"ride_dispatch:{ride_id}"
+
+
+async def republish_ride_request_until_accepted(ride_id: str) -> None:
+    filter_dict = {"_id": ObjectId(ride_id)}
+    ride = await get_ride(filter_dict=filter_dict)
+    if not ride:
+        try:
+            scheduler.remove_job(_ride_dispatch_job_id(ride_id))
+        except Exception:
+            pass
+        return
+
+    if ride.rideStatus != RideStatus.findingDriver:
+        try:
+            scheduler.remove_job(_ride_dispatch_job_id(ride_id))
+        except Exception:
+            pass
+        return
+
+    pickup_location = None
+    if ride.origin:
+        pickup_location = (ride.origin.latitude, ride.origin.longitude)
+    await publish_ride_request(
+        ride_id=ride.id,
+        pickup=ride.pickup,
+        destination=ride.destination,
+        vehicle_type=str(ride.vehicleType),
+        fare_estimate=ride.price,
+        rider_id=ride.userId,
+        pickup_location=pickup_location,
+    )
 
 
 async def check_if_state_is_still_pending_payment_and_delete_ride_if_it_is_still_pending_payment(ride_id:str):
@@ -133,6 +169,14 @@ async def add_ride(
             rider_id=ride.userId,
             pickup_location=pickup_location,
         )
+        scheduler.add_job(
+            republish_ride_request_until_accepted,
+            trigger="interval",
+            seconds=10,
+            kwargs={"ride_id": ride.id},
+            id=_ride_dispatch_job_id(ride.id),
+            replace_existing=True,
+        )
     except Exception:
         pass
     
@@ -183,6 +227,14 @@ async def add_ride_admin_func(
             fare_estimate=ride.price,
             rider_id=ride.userId,
             pickup_location=pickup_location,
+        )
+        scheduler.add_job(
+            republish_ride_request_until_accepted,
+            trigger="interval",
+            seconds=10,
+            kwargs={"ride_id": ride.id},
+            id=_ride_dispatch_job_id(ride.id),
+            replace_existing=True,
         )
     except Exception:
         pass
@@ -258,13 +310,15 @@ async def retrieve_rides_by_driver_id(driver_id: str) -> List[RideOut]:
 
     Raises:
         HTTPException 404(not found): if  Ride not found in the db
-        HTTPException 400(bad request): if  Invalid ride ID format
+        HTTPException 400(bad request): if  Invalid driver ID format
 
     Returns:
         _type_: RideOut
     """
     if not ObjectId.is_valid(driver_id):
-        raise HTTPException(status_code=400, detail="Invalid ride ID format")
+        print("driver_id",driver_id)
+        
+        raise HTTPException(status_code=400, detail="Invalid driver ID format")
 
     filter_dict = {"driverId": driver_id}
     result = await get_rides(filter_dict)
@@ -274,6 +328,18 @@ async def retrieve_rides_by_driver_id(driver_id: str) -> List[RideOut]:
 
     return result
 
+
+async def retrieve_active_ride_for_driver(driver_id: str) -> Optional[RideOut]:
+    if not ObjectId.is_valid(driver_id):
+        raise HTTPException(status_code=400, detail="Invalid driver ID format")
+    filter_dict = {
+        "driverId": driver_id,
+        "rideStatus": {"$in": [RideStatus.arrivingToPickup, RideStatus.drivingToDestination]},
+    }
+    result = await get_rides(filter_dict, start=0, stop=1)
+    if not result:
+        return None
+    return result[0]
 
 
 async def retrieve_rides_by_user_id_and_ride_id(user_id: str,ride_id:str) -> RideOut:
@@ -287,7 +353,7 @@ async def retrieve_rides_by_user_id_and_ride_id(user_id: str,ride_id:str) -> Rid
         _type_: RideOut
     """
     if not ObjectId.is_valid(user_id):
-        raise HTTPException(status_code=400, detail="Invalid ride ID format")
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
 
     if not ObjectId.is_valid(ride_id):
         raise HTTPException(status_code=400, detail="Invalid ride ID format")
@@ -501,6 +567,16 @@ async def update_ride_by_id(
             except Exception:
                 pass
 
+        if ride_data.rideStatus in {RideStatus.arrivingToPickup, RideStatus.drivingToDestination}:
+            try:
+                await maybe_publish_driver_route_for_ride(
+                    result,
+                    status=ride_data.rideStatus,
+                    force=True,
+                )
+            except Exception:
+                pass
+
     return result
 
 
@@ -560,6 +636,16 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
+
+        if ride_data.rideStatus in {RideStatus.arrivingToPickup, RideStatus.drivingToDestination}:
+            try:
+                await maybe_publish_driver_route_for_ride(
+                    result,
+                    status=ride_data.rideStatus,
+                    force=True,
+                )
+            except Exception:
+                pass
     
         
     return result
@@ -619,5 +705,15 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
+
+        if ride_data.rideStatus in {RideStatus.arrivingToPickup, RideStatus.drivingToDestination}:
+            try:
+                await maybe_publish_driver_route_for_ride(
+                    result,
+                    status=ride_data.rideStatus,
+                    force=True,
+                )
+            except Exception:
+                pass
     
     return result.model_dump()

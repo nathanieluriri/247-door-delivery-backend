@@ -25,6 +25,19 @@ class RideBase(BaseModel):
     stops:Optional[List[str]]=None
     vehicleType:VehicleType
     pickupSchedule:Optional[int]= Field(default_factory=lambda: int(time.time()))
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "pickup": "ChIJdd4hrwug2EcRmSrV3Vo6llI",
+                    "destination": "ChIJFfyz7Qug2EcRkzTg3u8g9a4",
+                    "stops": ["ChIJn8G1vQug2EcR0T9k0vJdp0E"],
+                    "vehicleType": "CAR",
+                    "pickupSchedule": 0,
+                }
+            ]
+        }
+    }
  
 class RideCreate(RideBase):
     price:Optional[float]=None

@@ -2,11 +2,13 @@
 
 from fastapi import Depends, HTTPException, Request,status
 from schemas.imports import AccountStatus
+from schemas.driver_document import DocumentStatus, DocumentType
 from schemas.tokens_schema import accessTokenOut
 from security.auth import verify_admin_token, verify_token_driver_role, verify_token_rider_role
 from services.admin_service import retrieve_admin_by_admin_id
 from services.rider_service import retrieve_rider_by_rider_id
 from services.driver_service import retrieve_driver_by_driver_id
+from services.driver_document_service import list_latest_documents_for_driver
 
 
 def _extract_user_id(token) -> str | None:
@@ -126,4 +128,48 @@ async def check_driver_account_status(
         )
     
     return driver
+
+
+async def check_driver_sse_eligibility(
+    request: Request,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    eligibility = await get_driver_sse_eligibility_status(token)
+    if not eligibility["eligible"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=eligibility["reasons"],
+        )
+    return eligibility["driver"]
+
+
+async def get_driver_sse_eligibility_status(token: accessTokenOut) -> dict:
+    reasons: list[str] = []
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        return {"eligible": False, "reasons": ["Driver not found"], "driver": None}
+
+    if getattr(driver, "accountStatus", None) != AccountStatus.ACTIVE:
+        reasons.append("Driver account is not active")
+
+    if not getattr(driver, "vehicleVerified", False):
+        reasons.append("Driver vehicle is not verified")
+
+    required_types = [
+        DocumentType.DRIVER_LICENSE,
+        DocumentType.VEHICLE_REGISTRATION,
+        DocumentType.INSURANCE,
+        DocumentType.BACKGROUND_CHECK,
+    ]
+    docs = await list_latest_documents_for_driver(driver_id=token.userId)
+    by_type = {doc.documentType: doc for doc in docs}
+    missing = []
+    for doc_type in required_types:
+        doc = by_type.get(doc_type)
+        if not doc or doc.status != DocumentStatus.APPROVED:
+            missing.append(doc_type.value)
+    if missing:
+        reasons.append(f"Driver documents not approved: {', '.join(missing)}")
+
+    return {"eligible": len(reasons) == 0, "reasons": reasons, "driver": driver}
     

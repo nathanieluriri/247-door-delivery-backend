@@ -28,7 +28,13 @@ def contains_mongo_operators(value):
 # ------------------------------
 # List Payments (with pagination and filtering)
 # ------------------------------
-@router.get("/", dependencies=[Depends(verify_admin_token),Depends(log_what_admin_does)] ,response_model=APIResponse[List[StripeEventOut]])
+@router.get(
+    "/",
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does)],
+    response_model=APIResponse[List[StripeEventOut]],
+    summary="List Stripe events",
+    description="Fetches Stripe event records with pagination and optional filtering.",
+)
 async def list_stripe_events(
     start: Optional[int] = Query(None, description="Start index for range-based pagination"),
     stop: Optional[int] = Query(None, description="Stop index for range-based pagination"),
@@ -37,10 +43,14 @@ async def list_stripe_events(
     filters: Optional[str] = Query(None, description="Optional JSON string of MongoDB filter criteria (e.g., '{\"field\": \"value\"}')")
 ):
     """
-    Retrieves a list of Payments with pagination and optional filtering.
-    - Priority 1: Range-based (start/stop)
-    - Priority 2: Page-based (page_number)
-    - Priority 3: Default (first 100)
+    Retrieves Stripe payment events with pagination and optional filtering.
+
+    Pagination priority:
+    1. Range-based (`start` + `stop`)
+    2. Page-based (`page_number`)
+    3. Default (first 100 records)
+
+    Access: Admin only (valid admin access token required).
     """
     PAGE_SIZE = 50
     MAX_PAGE_SIZE = 200
@@ -105,9 +115,18 @@ async def list_stripe_events(
  
 
 
-@router.post("/webhook")
+@router.post(
+    "/webhook",
+    summary="Stripe webhook handler",
+    description="Receives Stripe webhooks and dispatches them to the payment service handler.",
+)
 async def stripe_webhook(
     request: Request,
     payment_service: PaymentService = Depends(get_payment_service),
 ):
+    """
+    Receive and process Stripe webhook events.
+
+    Access: Public (Stripe signs requests; no app auth required).
+    """
     return await payment_service.webhook_handler(request)

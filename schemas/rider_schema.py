@@ -10,6 +10,19 @@ class RiderBase(BaseModel):
     password:str | bytes
     loginType:Optional[LoginType]=LoginType.password
     pass
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "firstName": "Taylor",
+                    "lastName": "Jordan",
+                    "email": "rider@example.com",
+                    "password": "StrongPass123!",
+                    "loginType": "password",
+                }
+            ]
+        }
+    }
 
 class RiderRefresh(BaseModel):
     # Add other fields here 

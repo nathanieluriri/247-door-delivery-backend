@@ -80,6 +80,17 @@ class FareBetweenPlacesCalculationRequest(BaseModel):
     pickup:str
     destination:str
     stops:Optional[List[str]]=None
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "pickup": "ChIJdd4hrwug2EcRmSrV3Vo6llI",
+                    "destination": "ChIJFfyz7Qug2EcRkzTg3u8g9a4",
+                    "stops": [],
+                }
+            ]
+        }
+    }
     
 class FareBetweenPlacesCalculationResponse(BaseModel):
     origin:Location

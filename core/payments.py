@@ -256,7 +256,33 @@ class StripePaymentProvider(PaymentProvider):
 
             print(f"[WEBHOOK] Checkout Session paid: id={session.id}")
  
-            ride_id = session.metadata.get("ride_id")
+            ride_id = session.metadata.get("ride_id") if session.metadata else None
+            if not ride_id and getattr(session, "client_reference_id", None):
+                ride_id = session.client_reference_id
+            if not ride_id and session.payment_link:
+                try:
+                    payment_link = await run_in_threadpool(
+                        stripe.PaymentLink.retrieve,
+                        session.payment_link,
+                    )
+                    if getattr(payment_link, "metadata", None):
+                        ride_id = payment_link.metadata.get("ride_id")
+                except Exception:
+                    pass
+            if not ride_id and session.payment_intent:
+                try:
+                    payment_intent = await run_in_threadpool(
+                        stripe.PaymentIntent.retrieve,
+                        session.payment_intent,
+                    )
+                    if getattr(payment_intent, "metadata", None):
+                        ride_id = payment_intent.metadata.get("ride_id")
+                except Exception:
+                    pass
+
+            if not ride_id:
+                print("[WEBHOOK] Missing ride_id; cannot update ride")
+                return {"status": "missing_ride_id"}
             payment_intent_id = session.payment_intent
 
             paid_ride = RideUpdate(checkoutSessionObject=session,stripeEvent=stripe_event,rideStatus=RideStatus.findingDriver,payment_intent_id=payment_intent_id,paymentStatus=True)

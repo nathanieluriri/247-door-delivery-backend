@@ -62,7 +62,8 @@ async def refresh_admin_tokens_reduce_number_of_logins(admin_refresh_data:AdminR
             await delete_refresh_token(refreshToken=admin_refresh_data.refresh_token)
             await delete_access_token(accessToken=expired_access_token)
             raise HTTPException(status_code=401,detail="Invalid refresh token")
-        if refreshObj.previousAccessToken==expired_access_token:
+        previous_token = str(refreshObj.previousAccessToken) if refreshObj.previousAccessToken is not None else None
+        if previous_token == str(expired_access_token):
             admin = await get_admin(filter_dict={"_id":ObjectId(refreshObj.userId)})
             
             if admin!= None:

@@ -75,6 +75,17 @@ class PayoutRequestIn(BaseModel):
     amount: int = Field(..., description="Amount to payout in smallest currency unit (e.g., pence for GBP)", gt=0)
     description: Optional[str] = Field(None, description="Description for the payout")
     instant: bool = Field(False, description="Whether to request an instant payout (higher fees)")
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "amount": 2500,
+                    "description": "Weekly withdrawal",
+                    "instant": False,
+                }
+            ]
+        }
+    }
 
 class PayoutOut(PayoutBase):
     # Add other fields here 

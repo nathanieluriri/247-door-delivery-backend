@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 
 from schemas.imports import RideStatus, UserType
+from core.routing_config import DeliveryRouteResponse
 
 
 class SSEEvent(BaseModel):
@@ -18,6 +19,7 @@ class SSEEventType(str, Enum):
     ride_request = "ride_request"
     ride_status_update = "ride_status_update"
     chat_message = "chat_message"
+    driver_route_update = "driver_route_update"
 
 
 class SSEAck(BaseModel):
@@ -42,6 +44,16 @@ class RideRequestEvent(BaseModel):
     vehicle_type: str = Field(..., alias="vehicleType")
     fare_estimate: Optional[float] = Field(default=None, alias="fareEstimate")
     rider_id: Optional[str] = Field(default=None, alias="riderId")
+
+    model_config = {"populate_by_name": True}
+
+
+class DriverRouteUpdate(BaseModel):
+    ride_id: str = Field(..., alias="rideId")
+    status: RideStatus
+    route: Optional[DeliveryRouteResponse] = None
+    generated_at: int = Field(..., alias="generatedAt")
+    error: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 

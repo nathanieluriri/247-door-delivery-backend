@@ -22,6 +22,16 @@ class DriverBase(BaseModel):
     # Add other fields here 
     email:EmailStr
     password:str | bytes
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "email": "driver@example.com",
+                    "password": "StrongPass123!",
+                }
+            ]
+        }
+    }
 
 class DriverCreate(DriverBase):
     # Add other fields here
@@ -30,6 +40,18 @@ class DriverCreate(DriverBase):
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "email": "driver@example.com",
+                    "password": "StrongPass123!",
+                    "firstName": "Alex",
+                    "lastName": "Morgan",
+                }
+            ]
+        }
+    }
     @model_validator(mode='after')
     def obscure_password(self):
         self.password=hash_password(self.password)
@@ -63,6 +85,9 @@ class DriverUpdate(BaseModel):
     requirementsPendingVerification: Optional[List[str]] = None
     onboardingRefreshUrl: Optional[str] = None
     onboardingReturnUrl: Optional[str] = None
+    vehicleVerified: Optional[bool] = None
+    vehicleVerifiedAt: Optional[int] = None
+    vehicleVerificationNotes: Optional[str] = None
     accountStatus:Optional[AccountStatus]=None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
    
@@ -77,8 +102,17 @@ class DriverUpdateStripeAccountId(BaseModel):
     requirementsPendingVerification: Optional[List[str]] = None
     onboardingRefreshUrl: Optional[str] = None
     onboardingReturnUrl: Optional[str] = None
+    vehicleVerified: Optional[bool] = None
+    vehicleVerifiedAt: Optional[int] = None
+    vehicleVerificationNotes: Optional[str] = None
     
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+
+
+class DriverVehicleVerificationUpdate(BaseModel):
+    vehicleVerified: bool
+    vehicleVerificationNotes: Optional[str] = None
+    vehicleVerifiedAt: int = Field(default_factory=lambda: int(time.time()))
    
 class DriverUpdatePassword(BaseModel):
     # Add other fields here 
@@ -112,6 +146,9 @@ class DriverOut(DriverBase):
     requirementsPendingVerification: Optional[List[str]] = None
     onboardingRefreshUrl: Optional[str] = None
     onboardingReturnUrl: Optional[str] = None
+    vehicleVerified: Optional[bool] = None
+    vehicleVerifiedAt: Optional[int] = None
+    vehicleVerificationNotes: Optional[str] = None
     vehicleType: Optional[VehicleType] = None
     vehicleMake: Optional[str] = None
     vehicleModel: Optional[str] = None
@@ -178,6 +215,17 @@ class DriverLocationUpdate(BaseModel):
     longitude: float
     accuracy_m: Optional[float] = None
     timestamp: int = Field(default_factory=lambda: int(time.time()))
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "latitude": 51.5072,
+                    "longitude": -0.1276,
+                    "accuracy_m": 12.5,
+                }
+            ]
+        }
+    }
 
 
 class DriverVehicleUpdate(BaseModel):
@@ -188,6 +236,20 @@ class DriverVehicleUpdate(BaseModel):
     vehiclePlateNumber: str
     vehicleYear: int
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "vehicleType": "CAR",
+                    "vehicleMake": "Toyota",
+                    "vehicleModel": "Corolla",
+                    "vehicleColor": "Black",
+                    "vehiclePlateNumber": "AB12-CDE",
+                    "vehicleYear": VEHICLE_MAX_YEAR - 1,
+                }
+            ]
+        }
+    }
 
     @field_validator("vehicleMake", "vehicleModel", "vehicleColor")
     @classmethod

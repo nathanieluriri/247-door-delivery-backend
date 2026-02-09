@@ -16,6 +16,16 @@ class ChatBase(BaseModel):
     rideId:str
     text:str 
     pass
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "rideId": "ride_1234567890",
+                    "text": "I'm at the pickup location.",
+                }
+            ]
+        }
+    }
 
 class ChatCreate(ChatBase):
     # Add other fields here
@@ -30,6 +40,8 @@ class ChatUpdate(BaseModel):
 
 class ChatOut(ChatBase):
     # Add other fields here 
+    userType: Optional[UserType] = None
+    userId: Optional[str] = None
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

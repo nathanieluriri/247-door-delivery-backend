@@ -7,6 +7,7 @@
 # ============================================================================
 
 import os
+import math
 from bson import ObjectId
 from fastapi import HTTPException
 from bson.errors import InvalidId
@@ -54,6 +55,8 @@ from services.sse_service import (
     publish_ride_request_to_driver,
     update_driver_presence,
 )
+from services.ride_service import retrieve_active_ride_for_driver
+from services.driver_route_service import maybe_publish_driver_route_for_ride
 from services.background_check_service import ensure_background_record, fetch_background_check
 
 oauth = OAuth()
@@ -353,23 +356,48 @@ async def update_driver_location(driver_id: str, location: DriverLocationUpdate)
     driver = await retrieve_driver_by_driver_id(id=driver_id)
     if not getattr(driver, "profileComplete", False):
         raise HTTPException(status_code=400, detail="Vehicle details must be set before updating location")
+    try:
+        latitude = float(location.latitude)
+        longitude = float(location.longitude)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid location coordinates")
+    if not (math.isfinite(latitude) and math.isfinite(longitude)):
+        raise HTTPException(status_code=400, detail="Invalid location coordinates")
     vehicle_type = getattr(driver, "vehicleType", None)
     await update_driver_presence(
         driver_id=driver_id,
-        latitude=location.latitude,
-        longitude=location.longitude,
+        latitude=latitude,
+        longitude=longitude,
         vehicle_type=str(vehicle_type) if vehicle_type else None,
         profile_complete=getattr(driver, "profileComplete", False),
         timestamp=location.timestamp,
         account_status=getattr(driver, "accountStatus", None),
     )
 
+    try:
+        active_ride = await retrieve_active_ride_for_driver(driver_id)
+        if active_ride:
+            await maybe_publish_driver_route_for_ride(
+                active_ride,
+                status=active_ride.rideStatus,
+                driver_location=(latitude, longitude),
+                force=False,
+            )
+    except Exception:
+        pass
+
 
 async def update_driver_vehicle(driver_id: str, vehicle_details: DriverVehicleUpdate) -> DriverOut:
     if not ObjectId.is_valid(driver_id):
         raise HTTPException(status_code=400, detail="Invalid driver ID format")
     filter_dict = {"_id": ObjectId(driver_id)}
-    result = await update_driver(filter_dict, vehicle_details)
+    update_payload = DriverUpdate(
+        **vehicle_details.model_dump(),
+        vehicleVerified=False,
+        vehicleVerifiedAt=None,
+        vehicleVerificationNotes=None,
+    )
+    result = await update_driver(filter_dict, update_payload)
     if not result:
         raise HTTPException(status_code=404, detail="Driver not found or update failed")
     return result
@@ -380,7 +408,7 @@ async def update_driver_vehicle(driver_id: str, vehicle_details: DriverVehicleUp
 # ------------ COMBINED LOGIC ---------
 # -------------------------------------
 
-async def ban_drivers(user_id: str, user:dict) -> dict:
+async def ban_drivers(user_id: str, user:dict) -> dict: # type: ignore
     user_data= DriverUpdateAccountStatus(**user)
     update =await update_driver_by_id_admin_func(driver_id=user_id,driver_data=user_data)
     rider = await retrieve_driver_by_driver_id(id=user_id)

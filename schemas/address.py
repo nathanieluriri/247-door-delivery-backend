@@ -17,6 +17,16 @@ class AddressBase(BaseModel):
     # Add other fields here
     placeId:str
     label:str 
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "placeId": "ChIJdd4hrwug2EcRmSrV3Vo6llI",
+                    "label": "Home",
+                }
+            ]
+        }
+    }
     
 
 class AddressCreate(AddressBase):

@@ -15,6 +15,17 @@ class RatingBase(BaseModel):
     rideId: str
     userId: str     #  the user who is being rated
     rating: int = Field(..., ge=1, le=5)
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "rideId": "ride_1234567890",
+                    "userId": "user_0987654321",
+                    "rating": 5,
+                }
+            ]
+        }
+    }
 
 class RatingCreate(RatingBase):
     # Add other fields here

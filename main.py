@@ -116,11 +116,66 @@ dictConfig(
     }
 )
 
+API_DESCRIPTION = """
+Door Delivery API powers riders, drivers, and admin operations for ride requests,
+dispatching, payments, and compliance workflows.
+
+## Authentication
+- Most endpoints require `Authorization: Bearer <access_token>`.
+- Access tokens are issued on login and refresh flows.
+- Some endpoints accept an optional token to infer identity.
+
+## Rate Limits
+Rate limits are enforced via Redis-based fixed windows:
+- Anonymous: 120/min
+- Member: 160/min
+- Admin: 240/min
+
+## Pagination
+List endpoints typically support `start`/`stop` (offset + limit) or `page_number`.
+
+## Errors
+Errors return a consistent `APIResponse` payload with `status_code`, `detail`, and `data`.
+"""
+
+tags_metadata = [
+    {
+        "name": "Health",
+        "description": "Service health checks and operational diagnostics.",
+    },
+    {
+        "name": "Admins",
+        "description": "Admin authentication, user management, compliance, and audit tools.",
+    },
+    {
+        "name": "Drivers",
+        "description": "Driver onboarding, profile, vehicle, documents, rides, and payouts.",
+    },
+    {
+        "name": "Riders",
+        "description": "Rider authentication, profile, addresses, rides, and ratings.",
+    },
+    {
+        "name": "Payments",
+        "description": "Stripe webhook ingestion and payment event reporting.",
+    },
+    {
+        "name": "SSE",
+        "description": "Server-Sent Events streams and acknowledgements.",
+    },
+    {
+        "name": "Chats",
+        "description": "Ride chat creation and streaming.",
+    },
+]
+
 app = FastAPI(
-    
-    lifespan= lifespan,
-    title="REST API",
-    
+    lifespan=lifespan,
+    title="Door Delivery API",
+    summary="On-demand delivery and ride platform API.",
+    description=API_DESCRIPTION,
+    version="1.0.0",
+    openapi_tags=tags_metadata,
 )
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
 app.add_middleware(RequestTimingMiddleware)
@@ -160,7 +215,10 @@ app.add_middleware(RateLimitingMiddleware)
 # Add CORS middleware (be cautious in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production
+    allow_origins=[
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -178,14 +236,223 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
         ).dict()
     )
 
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logging.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content=APIResponse(
+            status_code=500,
+            data=None,
+            detail="Internal server error",
+        ).dict(),
+    )
+
 async def test_scheduler(message):
     print(message)
     
+
+
+@app.post(
+    "/ride/publish-test",
+    response_model=APIResponse[dict],
+    summary="Test publish ride request",
+    description="Publishes a ride request event to nearby drivers using a fixed payload.",
+)
+async def publish_ride_request_test():
+    data = {
+        "pickup": "ChIJpWm44e0LThARBZjsnnXbdXs",
+        "destination": "ChIJ68mtM_IKThARPkerhQBAsqc",
+        "vehicleType": "CAR",
+        "pickupSchedule": 1770393207214,
+        "paymentStatus": True,
+        "price": 8506.4,
+        "rideStatus": "findingDriver",
+        "userId": "694573edfb42ab4e70634aec",
+        "checkoutSessionObject": {
+            "id": "cs_test_a1BFh6SvD7J9dKh5UgNFLgxN44sXjym4gb9WgNkXdsww4iS9qxyE4WkYlv",
+            "payment_status": "paid",
+            "amount_total": 851,
+            "currency": "gbp",
+            "payment_intent": "pi_3SxrLeEM4mSGBUuf0df4RIUB",
+            "payment_link": "plink_1SxrLXEM4mSGBUufQMJQRc72",
+            "metadata": {
+                "ride_id": "69860e78919dd9c5d0ac6a8d",
+                "user_id": "694573edfb42ab4e70634aec",
+            },
+        },
+        "stripeEvent": {
+            "id": "evt_1SxrLgEM4mSGBUufkI7FJ6Qd",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_a1BFh6SvD7J9dKh5UgNFLgxN44sXjym4gb9WgNkXdsww4iS9qxyE4WkYlv",
+                    "object": "checkout.session",
+                    "adaptive_pricing": {"enabled": True},
+                    "after_expiration": None,
+                    "allow_promotion_codes": False,
+                    "amount_subtotal": 851,
+                    "amount_total": 851,
+                    "automatic_tax": {
+                        "enabled": False,
+                        "liability": None,
+                        "provider": None,
+                        "status": None,
+                    },
+                    "billing_address_collection": "auto",
+                    "cancel_url": "https://stripe.com",
+                    "client_reference_id": None,
+                    "client_secret": None,
+                    "collected_information": None,
+                    "consent": None,
+                    "consent_collection": None,
+                    "created": 1770393209,
+                    "currency": "gbp",
+                    "currency_conversion": None,
+                    "custom_fields": [],
+                    "custom_text": {
+                        "after_submit": None,
+                        "shipping_address": None,
+                        "submit": None,
+                        "terms_of_service_acceptance": None,
+                    },
+                    "customer": None,
+                    "customer_account": None,
+                    "customer_creation": "if_required",
+                    "customer_details": {
+                        "address": {
+                            "city": "Bristol",
+                            "country": "GB",
+                            "line1": "3 Princess Street",
+                            "line2": "Units 2",
+                            "postal_code": "BS3 4AG",
+                            "state": None,
+                        },
+                        "business_name": None,
+                        "email": "nathaniel@doux.finance",
+                        "individual_name": None,
+                        "name": "Nath",
+                        "phone": None,
+                        "tax_exempt": "none",
+                        "tax_ids": [],
+                    },
+                    "customer_email": None,
+                    "discounts": [],
+                    "expires_at": 1770479609,
+                    "invoice": None,
+                    "invoice_creation": {
+                        "enabled": False,
+                        "invoice_data": {
+                            "account_tax_ids": None,
+                            "custom_fields": None,
+                            "description": None,
+                            "footer": None,
+                            "issuer": None,
+                            "metadata": {},
+                            "rendering_options": None,
+                        },
+                    },
+                    "livemode": False,
+                    "locale": "auto",
+                    "metadata": {
+                        "ride_id": "69860e78919dd9c5d0ac6a8d",
+                        "user_id": "694573edfb42ab4e70634aec",
+                    },
+                    "mode": "payment",
+                    "origin_context": None,
+                    "payment_intent": "pi_3SxrLeEM4mSGBUuf0df4RIUB",
+                    "payment_link": "plink_1SxrLXEM4mSGBUufQMJQRc72",
+                    "payment_method_collection": "if_required",
+                    "payment_method_configuration_details": {
+                        "id": "pmc_1SIYzrEM4mSGBUufrLGUnZLs",
+                        "parent": None,
+                    },
+                    "payment_method_options": {},
+                    "payment_method_types": [
+                        "card",
+                        "link",
+                        "revolut_pay",
+                        "amazon_pay",
+                    ],
+                    "payment_status": "paid",
+                    "permissions": None,
+                    "phone_number_collection": {"enabled": False},
+                    "recovered_from": None,
+                    "saved_payment_method_options": None,
+                    "setup_intent": None,
+                    "shipping_address_collection": None,
+                    "shipping_cost": None,
+                    "shipping_details": None,
+                    "shipping_options": [],
+                    "status": "complete",
+                    "submit_type": "auto",
+                    "subscription": None,
+                    "success_url": "https://yourapp.com/payment/success",
+                    "total_details": {
+                        "amount_discount": 0,
+                        "amount_shipping": 0,
+                        "amount_tax": 0,
+                    },
+                    "ui_mode": "hosted",
+                    "url": None,
+                    "wallet_options": None,
+                }
+            },
+        },
+        "origin": {"latitude": 9.0725085, "longitude": 7.4953609},
+        "paymentLink": "https://buy.stripe.com/test_6oUfZhebbg0R0LX6xP77O1A",
+        "map": {
+            "totalDistanceMeters": 4173,
+            "totalDurationSeconds": 391,
+            "encodedPolyline": "s~jv@y}vl@VKjDd@d@Dv@F|@AhAB|AKfBYbCo@zAo@hAk@MYOH_@R_@Pa@PqAVmAFoAEeAO[GeEeA}Ba@aCWcBIkBGuA?}DLy@@}@GmD]gBMuCQkAE}AByCXuB`@uAd@iAf@c@XcAv@oAfAmAvA_@f@yJ|OS`@[CQBKBOHYr@C^@PC`@YtAYv@o@`BeBhFe@dBg@jB`Bd@vCt@`FpAM^Wz@q@nCaCbJiBtHi@rBs@hBMXk@_@W`@EV",
+            "waypointOrder": [],
+            "legs": [
+                {
+                    "startAddress": "SCHATZ PARK AND GARDEN (JAV CHRISTMAS VILLAGE), Shehu Shagari Wy, Wuse, Abuja 904101, Federal Capital Territory, Nigeria",
+                    "endAddress": "61 Aguiyi Ironsi St, Maitama, Abuja 904101, Federal Capital Territory, Nigeria",
+                    "distanceMeters": 4173,
+                    "durationSeconds": 391,
+                }
+            ],
+        },
+        "id": "69860e78919dd9c5d0ac6a8d",
+        "dateCreated": 1770393207,
+        "lastUpdated": 1770393217,
+    }
+
+    pickup_location = (data["origin"]["latitude"], data["origin"]["longitude"])
+    count = await publish_ride_request(
+        ride_id=data["id"],
+        pickup=data["pickup"],
+        destination=data["destination"],
+        vehicle_type=str(data["vehicleType"]),
+        fare_estimate=data["price"],
+        rider_id=data["userId"],
+        pickup_location=pickup_location,
+    )
+    return APIResponse(
+        status_code=200,
+        data={"published_to": count, "ride_id": data["id"]},
+        detail="Ride request published",
+    )
+
    
     
 # Simple test route
-@app.get("/",tags=["Health"],include_in_schema=False)
+@app.get(
+    "/",
+    tags=["Health"],
+    include_in_schema=False,
+    summary="Root ping (internal)",
+    description="Lightweight ping endpoint to verify the API process is running.",
+)
 def root():
+    """
+    Internal root ping used for smoke checks and scheduler testing.
+
+    Access: Public (no auth), intended for internal diagnostics.
+    """
     run_time = datetime.now() + timedelta(seconds=20)
     scheduler.add_job(test_scheduler,"date",run_date=run_time,args=[f"test message {run_time}"],misfire_grace_time=31536000)
     
@@ -199,8 +466,19 @@ redis_client = redis.Redis.from_url(REDIS_URI, socket_connect_timeout=2)
 
 
 # Health check route
-@app.get("/health",tags=["Health"])
+@app.get(
+    "/health",
+    tags=["Health"],
+    summary="Lightweight health check",
+    description="Returns a compact status snapshot for MongoDB, Redis, APScheduler, and Celery.",
+    response_description="Overall service status with dependency snapshots.",
+)
 async def health_check_regular():
+    """
+    Return a compact health snapshot of MongoDB, Redis, APScheduler, and Celery.
+
+    Access: Public (no auth).
+    """
     overall_status = "healthy"
     services = {}
 
@@ -319,8 +597,19 @@ async def health_check_regular():
     )
 
 
-@app.get("/test_broadcast", tags=["sse"])
+@app.get(
+    "/test_broadcast",
+    tags=["SSE"],
+    summary="Trigger a test ride request broadcast",
+    description="Publishes a synthetic ride request event to validate SSE delivery.",
+    response_description="Publishes a test SSE event for driver discovery.",
+)
 async def test_sse_broadcast(pickup_lat: float, pickup_lon: float):
+    """
+    Send a synthetic ride request event to validate SSE plumbing.
+
+    Access: Public (no auth), intended for internal testing only.
+    """
     await publish_ride_request(
         ride_id="1234567897542",
         pickup=f"{pickup_lat},{pickup_lon}",
@@ -333,8 +622,19 @@ async def test_sse_broadcast(pickup_lat: float, pickup_lon: float):
 
 
 
-@app.get("/health-detailed",tags=["Health"], summary="Performs a detailed health check of all integrated services")
+@app.get(
+    "/health-detailed",
+    tags=["Health"],
+    summary="Detailed health check",
+    description="Returns a detailed per-service report with latency and status metadata.",
+    response_description="Per-service status with latency, messages, and timestamps.",
+)
 async def health_check():
+    """
+    Return a verbose health report across MongoDB, Redis, APScheduler, and Celery.
+
+    Access: Public (no auth).
+    """
     services = {}
     # This list will track the status of all services
     service_statuses = [] 
@@ -515,14 +815,16 @@ from api.v1.rider_route import router as v1_rider_route_router
 from api.v1.payment import router as v1_payment_router
 from api.v1.sse import router as v1_sse_router
 from api.v1.quarantine import router as v1_quarantine_router
+from api.v1.chat import router as v1_chat_router
 
 
-app.include_router(v1_admin_route_router, prefix='/api/v1',include_in_schema=True)
+app.include_router(v1_admin_route_router, prefix='/api/v1', include_in_schema=True)
 app.include_router(v1_driver_router, prefix='/api/v1')
 app.include_router(v1_rider_route_router, prefix='/api/v1')
-app.include_router(v1_payment_router, prefix='/api/v1',include_in_schema=False)
+app.include_router(v1_payment_router, prefix='/api/v1', include_in_schema=True)
 app.include_router(v1_sse_router, prefix='/api/v1')
 app.include_router(v1_quarantine_router, prefix='/api/v1')
+app.include_router(v1_chat_router, prefix='/api/v1')
 # --- auto-routes-end ---
 
 
