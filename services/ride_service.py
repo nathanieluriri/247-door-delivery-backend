@@ -20,6 +20,8 @@ from datetime import timezone
 utc = timezone.utc
 from core.payments import PaymentService, get_payment_service
 from services.sse_service import publish_ride_status_update, publish_ride_request
+from services.payout_service import add_payout
+from repositories.payout import get_payouts
 from core.redis_cache import async_redis
 from core.metrics import match_time_seconds, driver_acceptance_rate, driver_rejects
 from repositories.ride import (
@@ -30,8 +32,9 @@ from repositories.ride import (
     update_ride,
     delete_ride,
 )
-from schemas.imports import ALLOWED_RIDE_STATUS_TRANSITIONS, RIDE_REFUND_RULES, RideStatus
+from schemas.imports import ALLOWED_RIDE_STATUS_TRANSITIONS, RIDE_REFUND_RULES, RideStatus, PayoutOptions
 from schemas.ride import RideCreate, RideUpdate, RideOut, RideShareLinkOut
+from schemas.payout import PayoutCreate
 from services.driver_route_service import maybe_publish_driver_route_for_ride
 
 
@@ -40,6 +43,36 @@ FRONTEND_SHARE_RIDE_URL = os.getenv("FRONTEND_SHARE_RIDE_URL", "http://localhost
 
 def _ride_dispatch_job_id(ride_id: str) -> str:
     return f"ride_dispatch:{ride_id}"
+
+
+async def _maybe_create_payout_for_completed_ride(ride: RideOut) -> None:
+    if not ride or not ride.driverId or not ride.id:
+        return
+    if ride.rideStatus != RideStatus.completed:
+        return
+    if ride.price is None:
+        return
+    try:
+        existing = await get_payouts(
+            filter_dict={
+                "driverId": ride.driverId,
+                "payoutOption": PayoutOptions.totalEarnings,
+                "rideIds": ride.id,
+            },
+            start=0,
+            stop=1,
+        )
+        if existing:
+            return
+        payout_record = PayoutCreate(
+            payoutOption=PayoutOptions.totalEarnings,
+            amount=float(ride.price),
+            driverId=ride.driverId,
+            rideIds=[ride.id],
+        )
+        await add_payout(payout_record)
+    except Exception:
+        pass
 
 
 async def republish_ride_request_until_accepted(ride_id: str) -> None:
@@ -577,6 +610,12 @@ async def update_ride_by_id(
             except Exception:
                 pass
 
+        if ride_data.rideStatus == RideStatus.completed:
+            try:
+                await _maybe_create_payout_for_completed_ride(result)
+            except Exception:
+                pass
+
     return result
 
 
@@ -646,6 +685,12 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
                 )
             except Exception:
                 pass
+
+        if ride_data.rideStatus == RideStatus.completed:
+            try:
+                await _maybe_create_payout_for_completed_ride(result)
+            except Exception:
+                pass
     
         
     return result
@@ -713,6 +758,12 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
                     status=ride_data.rideStatus,
                     force=True,
                 )
+            except Exception:
+                pass
+
+        if ride_data.rideStatus == RideStatus.completed:
+            try:
+                await _maybe_create_payout_for_completed_ride(result)
             except Exception:
                 pass
     

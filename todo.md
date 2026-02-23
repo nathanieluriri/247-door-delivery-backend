@@ -1,5 +1,7 @@
 # Remaining TODOs (as of 2026-01-31)
 
+# Most important todo now is wiring the payout and ride completion else user won't be able to see earnings after a completed ride so thats what I need to finish as quickly as possible
+
 1) Integrity & AV
    - What’s left: schedule periodic hash re-verification job; admin UI/API to list/release/delete quarantined items.
    - How to do it: add APScheduler job to call `services.integrity_job.reverify_all_drivers`; extend quarantine API with release/delete actions and admin auth checks.

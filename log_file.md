@@ -4066,3 +4066,78 @@
 [2026-02-09 02:56:02 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
 [2026-02-09 02:56:02 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
 [2026-02-09 02:56:02 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770605762
+[2026-02-09 03:15:17 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 03:15:17 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 03:15:17 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770606917
+[2026-02-09 08:38:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:38:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:38:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626339
+[2026-02-09 08:39:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:39:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:40:00 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626399
+[2026-02-09 08:40:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:40:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:40:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626459
+[2026-02-09 08:41:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:41:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:41:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626519
+[2026-02-09 08:42:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:42:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:42:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626579
+[2026-02-09 08:43:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:43:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:43:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626639
+[2026-02-09 08:44:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:44:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:44:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626699
+[2026-02-09 08:45:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:45:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:45:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626759
+[2026-02-09 08:46:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:46:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:46:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626819
+[2026-02-09 08:47:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:47:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:47:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626879
+[2026-02-09 08:48:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:48:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:48:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770626939
+[2026-02-09 08:50:00 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:50:00 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:50:00 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627000
+[2026-02-09 08:50:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:50:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:50:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627059
+[2026-02-09 08:52:00 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:52:00 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:52:00 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627120
+[2026-02-09 08:53:00 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:53:00 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:53:00 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627179
+[2026-02-09 08:53:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:53:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:53:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627239
+[2026-02-09 08:54:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:54:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:54:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627299
+[2026-02-09 08:55:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:55:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:55:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627359
+[2026-02-09 08:56:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:56:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:56:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627419
+[2026-02-09 08:57:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:57:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:57:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627479
+[2026-02-09 08:58:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:58:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:58:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627539
+[2026-02-09 08:59:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 08:59:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 08:59:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627599
+[2026-02-09 09:00:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 09:00:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 09:00:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627659
+[2026-02-09 09:01:59 UTC] update_driver_presence:start id=697f9920b39e4d7e454bbc68 lat=9.08827872696703 lng=7.481560106582494 vehicle_type=VehicleType.CAR profile_complete=True account_status=active
+[2026-02-09 09:01:59 UTC] update_driver_presence:geoadd_ok id=697f9920b39e4d7e454bbc68
+[2026-02-09 09:01:59 UTC] update_driver_presence:presence_ok id=697f9920b39e4d7e454bbc68 last_seen=1770627719
