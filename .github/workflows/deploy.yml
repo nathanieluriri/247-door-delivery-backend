@@ -22,6 +22,6 @@ jobs:
           script: |
             set -e
             cd 247-door-delivery-backend
-            git pull origin main
+            git pull origin master
             sudo docker compose down
             sudo docker compose up -d --build
