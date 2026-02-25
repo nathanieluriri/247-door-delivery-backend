@@ -1,11 +1,7 @@
 import os
 from celery import Celery
 from dotenv import load_dotenv
-import asyncio
-import importlib
 import celery_aio_pool as aio_pool
-
-from core.tasks import ASYNC_TASK_REGISTRY
 
 
 load_dotenv()
@@ -28,6 +24,8 @@ async def run_async_task(task_key: str, kwargs: dict):
     kwargs example: {'filter_dict': {'_id': '...'}}
     """
     
+    from core.tasks import ASYNC_TASK_REGISTRY
+
     # 3. Lookup the function object from the registry
     target_func = ASYNC_TASK_REGISTRY.get(task_key)
 
