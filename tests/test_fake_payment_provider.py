@@ -55,7 +55,7 @@ async def test_fake_provider_create_fetch_refund_flow(monkeypatch):
         )
     )
 
-    assert intent.checkout_url.endswith("/api/v1/payments/fake/checkout/ride:123")
+    assert intent.checkout_url.endswith("/api/web/payments/link/ride:123")
     assert intent.status == PaymentStatus.PENDING
 
     tx = await provider.fetch_transaction("ride:123")

@@ -1,6 +1,7 @@
 fastapi[all]
 requests
 pyjwt
+pytest-asyncio
 dotenv==0.9.9
 uvicorn
 python-dotenv

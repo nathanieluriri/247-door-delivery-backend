@@ -1,24 +1,27 @@
-name: Deploy to EC2  
+name: Deploy to EC2 (Production)
 
 on:
   push:
-    branches: [master] # or main if that’s your default branch
+    branches: [main]
 
 jobs:
   deploy:
+    name: Deploy to Production EC2
     runs-on: ubuntu-latest
-    environment: Production
+    environment:
+      name: Production
+
     steps:
-      - name: SSH & Deploy to EC2  
-        uses: appleboy/ssh-action@master
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}          # your EC2 public IP or DNS
-          username: ubuntu                       # use ubuntu (default for AWS Ubuntu AMIs)
-          key: ${{ secrets.EC2_SSH_KEY }}        # your private PEM key (add to GitHub secrets)
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
-            cd 247-door-delivery-backend         # adjust if your code lives elsewhere
-            git pull origin master               # or main
+            set -e
+            cd 247-door-delivery-backend
+            git pull origin main
             sudo docker compose down
-            sudo docker compose up --build -d
-            
+            sudo docker compose up -d --build

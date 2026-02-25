@@ -201,13 +201,11 @@ class DriverOut(DriverBase):
         ]
         self.profileComplete = all(field is not None and str(field).strip() for field in required_fields)
         return self
-            
-    class Config:
-        populate_by_name = True  # allows using `id` when constructing the model
-        arbitrary_types_allowed = True  # allows ObjectId type
-        json_encoders ={
-            ObjectId: str  # automatically converts ObjectId → str
-        }
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={ObjectId: str},
+    )
 
 
 class DriverLocationUpdate(BaseModel):

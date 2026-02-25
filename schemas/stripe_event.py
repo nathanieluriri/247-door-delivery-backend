@@ -48,10 +48,8 @@ class StripeEventOut(StripeEventBase):
         if "_id" in values and isinstance(values["_id"], ObjectId):
             values["_id"] = str(values["_id"])  # coerce to string before validation
         return values
-            
-    class Config:
-        populate_by_name = True  # allows using `id` when constructing the model
-        arbitrary_types_allowed = True  # allows ObjectId type
-        json_encoders ={
-            ObjectId: str  # automatically converts ObjectId → str
-        }
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={ObjectId: str},
+    )

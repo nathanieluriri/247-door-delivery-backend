@@ -1,6 +1,6 @@
 from bson import ObjectId
 from pydantic import AliasChoices, GetJsonSchemaHandler
-from pydantic import BaseModel, EmailStr, Field,model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field,model_validator
 from pydantic_core import core_schema
 from datetime import datetime,timezone
 from typing import Dict, Optional,List,Any

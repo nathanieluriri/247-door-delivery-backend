@@ -25,8 +25,10 @@ from core.metrics import av_scan_failures, integrity_failures
 
 try:
     import boto3  # type: ignore
+    from botocore.exceptions import ClientError
 except ImportError:  # pragma: no cover - optional
     boto3 = None
+    ClientError = None  # type: ignore[assignment]
 
 
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
@@ -112,15 +114,8 @@ def get_signed_url(key: str) -> Optional[str]:
 def verify_integrity(key: str, expected_sha256: Optional[str]) -> bool:
     if not expected_sha256:
         return False
-    if STORAGE_BACKEND == "s3" and boto3 is not None and not key.startswith("/"):
-        bucket = os.environ["STORAGE_S3_BUCKET"]
-        region = os.getenv("STORAGE_S3_REGION")
-        endpoint = os.getenv("STORAGE_S3_ENDPOINT")
-        s3 = boto3.client("s3", region_name=region, endpoint_url=endpoint)
-        meta = s3.head_object(Bucket=bucket, Key=key)
-        stored = meta.get("Metadata", {}).get("sha256")
-        return stored == expected_sha256
-    # local path
+
+    # Prefer local verification whenever `key` points to a real file path.
     if os.path.exists(key):
         with open(key, "rb") as f:
             data = f.read()
@@ -129,6 +124,27 @@ def verify_integrity(key: str, expected_sha256: Optional[str]) -> bool:
         if not ok:
             integrity_failures.inc()
         return ok
+
+    if STORAGE_BACKEND == "s3" and boto3 is not None:
+        bucket = os.environ["STORAGE_S3_BUCKET"]
+        region = os.getenv("STORAGE_S3_REGION")
+        endpoint = os.getenv("STORAGE_S3_ENDPOINT")
+        s3 = boto3.client("s3", region_name=region, endpoint_url=endpoint)
+        try:
+            meta = s3.head_object(Bucket=bucket, Key=key)
+        except Exception as err:
+            if ClientError is not None and isinstance(err, ClientError):
+                integrity_failures.inc()
+                return False
+            integrity_failures.inc()
+            return False
+
+        stored = meta.get("Metadata", {}).get("sha256")
+        ok = stored == expected_sha256
+        if not ok:
+            integrity_failures.inc()
+        return ok
+
     integrity_failures.inc()
     return False
 
