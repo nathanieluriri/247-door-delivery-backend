@@ -23,10 +23,12 @@ import redis
 from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
 from core.database import db
+from core.payments import configure_payment_manager
 from security.encrypting_jwt import decode_jwt_token
 from redis_om import Migrator
 from starlette.concurrency import run_in_threadpool
 from services.sse_service import publish_ride_request, cleanup_stale_driver_locations
+from services.ride_service import rehydrate_scheduled_ride_jobs
 from middlewares.rate_limiting_middleware import RateLimitingMiddleware
 
 MONGO_URI = os.getenv("MONGO_URL")
@@ -83,6 +85,8 @@ async def lifespan(app:FastAPI):
     }
 
 )
+    configure_payment_manager(force=True)
+    await rehydrate_scheduled_ride_jobs()
 
 
     scheduler.start()
@@ -157,7 +161,7 @@ tags_metadata = [
     },
     {
         "name": "Payments",
-        "description": "Stripe webhook ingestion and payment event reporting.",
+        "description": "Payment webhooks, provider switching, and payment event reporting.",
     },
     {
         "name": "SSE",
@@ -816,6 +820,7 @@ from api.v1.payment import router as v1_payment_router
 from api.v1.sse import router as v1_sse_router
 from api.v1.quarantine import router as v1_quarantine_router
 from api.v1.chat import router as v1_chat_router
+from api.web.payment_template_route import router as web_payment_template_router
 
 
 app.include_router(v1_admin_route_router, prefix='/api/v1', include_in_schema=True)
@@ -825,6 +830,7 @@ app.include_router(v1_payment_router, prefix='/api/v1', include_in_schema=True)
 app.include_router(v1_sse_router, prefix='/api/v1')
 app.include_router(v1_quarantine_router, prefix='/api/v1')
 app.include_router(v1_chat_router, prefix='/api/v1')
+app.include_router(web_payment_template_router, prefix='/api', include_in_schema=False)
 # --- auto-routes-end ---
 
 

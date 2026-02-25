@@ -34,13 +34,14 @@ async def add_rating(rating_data: RatingCreate, driverId: Optional[str] = None, 
    
    
     ride = await retrieve_ride_by_ride_id(id=rating_data.rideId)
+    completed_like_statuses = {RideStatus.completed, RideStatus.awaitingPayment, RideStatus.paymentFailed}
     if driverId is not None and riderId is None:
-        if ride.rideStatus == RideStatus.completed and ride.driverId == driverId:
+        if ride.rideStatus in completed_like_statuses and ride.driverId == driverId:
             return await create_rating(rating_data)
         raise HTTPException(status_code=403, detail="Driver not allowed to rate this ride")
 
     if driverId is None and riderId is not None:
-        if ride.rideStatus == RideStatus.completed and ride.userId == riderId:
+        if ride.rideStatus in completed_like_statuses and ride.userId == riderId:
             return await create_rating(rating_data)
         raise HTTPException(status_code=403, detail="Rider not allowed to rate this ride")
 

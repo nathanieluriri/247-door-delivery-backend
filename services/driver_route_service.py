@@ -100,11 +100,31 @@ async def _resolve_driver_location(driver_id: str) -> Optional[Tuple[float, floa
     return lat, lng
 
 
+def _extract_place_id(place: object) -> Optional[str]:
+    if isinstance(place, str):
+        value = place.strip()
+        return value or None
+    if isinstance(place, dict):
+        place_id = place.get("place_id")
+        if isinstance(place_id, str):
+            value = place_id.strip()
+            return value or None
+        return None
+    place_id = getattr(place, "place_id", None)
+    if isinstance(place_id, str):
+        value = place_id.strip()
+        return value or None
+    return None
+
+
 async def _get_destination_coords(ride) -> Optional[Tuple[float, float]]:
     if not ride.destination:
         return None
+    destination_place_id = _extract_place_id(ride.destination)
+    if not destination_place_id:
+        return None
     try:
-        response = await get_place_details(ride.destination)
+        response = await get_place_details(destination_place_id)
     except Exception as exc:
         logger.warning("Failed to resolve destination place id for ride %s: %s", ride.id, exc)
         return None

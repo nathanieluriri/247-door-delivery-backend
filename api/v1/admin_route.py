@@ -897,8 +897,8 @@ async def create_a_ride_for_user(
 
     Access: Admin only (valid admin access token required).
     """
-    pick_up = await get_place_details(place_id=ride_data.pickup)
-    drop_off = await get_place_details(place_id=ride_data.destination)
+    pick_up = await get_place_details(place_id=ride_data.pickup.place_id)
+    drop_off = await get_place_details(place_id=ride_data.destination.place_id)
     if pick_up.data==None or drop_off.data==None:
         raise HTTPException(status_code=500, detail="pickup or dropoff details fetching failed")
     origin = (pick_up.data["lat"],pick_up.data["lng"])
@@ -928,7 +928,6 @@ async def create_a_ride_for_user(
         price=price,
         origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),
         map=map,
-        rideStatus=RideStatus.findingDriver,
         paymentStatus=False,
     )
     

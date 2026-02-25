@@ -11,14 +11,66 @@
 from pymongo import ReturnDocument
 from core.database import db
 from fastapi import HTTPException,status
-from typing import List,Optional
+from typing import Any, Dict, List, Optional
 from schemas.ride import RideUpdate, RideCreate, RideOut
+from services.place_service import get_place_details
 
 
+
+
+async def _hydrate_place_from_place_id(
+    place_value: object,
+    cache: Dict[str, object],
+) -> object:
+    if not isinstance(place_value, str):
+        return place_value
+    place_id = place_value.strip()
+    if not place_id:
+        return place_value
+
+    cached_value = cache.get(place_id)
+    if cached_value is not None:
+        return cached_value
+
+    hydrated_value: object = place_value
+    try:
+        place_response = await get_place_details(place_id=place_id)
+        place_data = getattr(place_response, "data", None) or {}
+        lat = place_data.get("lat")
+        lng = place_data.get("lng")
+        if lat is not None and lng is not None:
+            hydrated_value = {
+                "place_id": place_id,
+                "name": place_data.get("name") or place_data.get("address") or place_id,
+                "formatted_address": place_data.get("address") or place_data.get("name") or place_id,
+                "longitude": float(lng),
+                "latitude": float(lat),
+            }
+    except Exception:
+        hydrated_value = place_value
+
+    cache[place_id] = hydrated_value
+    return hydrated_value
+
+
+async def _hydrate_ride_places(doc: Dict[str, Any], cache: Dict[str, object]) -> Dict[str, Any]:
+    hydrated_doc = dict(doc)
+    hydrated_doc["pickup"] = await _hydrate_place_from_place_id(hydrated_doc.get("pickup"), cache)
+    hydrated_doc["destination"] = await _hydrate_place_from_place_id(hydrated_doc.get("destination"), cache)
+    return hydrated_doc
 
 
 async def check_if_user_has_an_existing_active_ride(user_id:str):
-    active_statuses = ["arrivingToPickup","drivingToDestination","pendingPayment"]
+    active_statuses = [
+        "scheduled",
+        "matching",
+        "findingDriver",
+        "arrivingToPickup",
+        "drivingToDestination",
+        "awaitingPayment",
+        "paymentFailed",
+        "pendingPayment",
+    ]
     existing_ride = await db.rides.find_one({
         "userId": user_id, 
         "rideStatus": {"$in": active_statuses}
@@ -36,7 +88,8 @@ async def create_ride(ride_data: RideCreate) -> RideOut:
 
     result =await db.rides.insert_one(ride_dict)
     result = await db.rides.find_one(filter={"_id":result.inserted_id})
-    returnable_result = RideOut(**result)
+    hydrated_result = await _hydrate_ride_places(result, {})
+    returnable_result = RideOut(**hydrated_result)
     return returnable_result
 
 async def get_ride(filter_dict: dict) -> Optional[RideOut]:
@@ -51,7 +104,8 @@ async def get_ride(filter_dict: dict) -> Optional[RideOut]:
         if result is None:
             return None
 
-        return RideOut(**result)
+        hydrated_result = await _hydrate_ride_places(result, {})
+        return RideOut(**hydrated_result)
 
     except Exception as e:
         raise HTTPException(
@@ -72,9 +126,11 @@ async def get_rides(filter_dict: Optional[dict] = None,start=0,stop=100) -> List
         .limit(limit)
         )
         ride_list = []
+        place_cache: Dict[str, object] = {}
 
         async for doc in cursor:
-            ride_list.append(RideOut(**doc))
+            hydrated_doc = await _hydrate_ride_places(doc, place_cache)
+            ride_list.append(RideOut(**hydrated_doc))
 
         return ride_list
 
@@ -105,7 +161,8 @@ async def update_ride(filter_dict: dict, ride_data: RideUpdate) -> RideOut:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ride not found."
         )
-    returnable_result = RideOut(**result)
+    hydrated_result = await _hydrate_ride_places(result, {})
+    returnable_result = RideOut(**hydrated_result)
     return returnable_result
 
 async def delete_ride(filter_dict: dict):

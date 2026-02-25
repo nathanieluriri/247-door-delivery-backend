@@ -1,5 +1,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Request, status
+from fastapi.responses import RedirectResponse
 from typing import List, Optional
 import json
 from core.admin_logger import log_what_admin_does
@@ -116,17 +117,56 @@ async def list_stripe_events(
 
 
 @router.post(
-    "/webhook",
-    summary="Stripe webhook handler",
-    description="Receives Stripe webhooks and dispatches them to the payment service handler.",
+    "/webhooks/{provider}",
+    summary="Payment webhook handler",
+    description="Receives provider webhooks and dispatches them to the payment service handler.",
 )
-async def stripe_webhook(
+async def payment_webhook(
     request: Request,
+    provider: str = Path(..., description="Payment provider key (`stripe` or `fake`)"),
     payment_service: PaymentService = Depends(get_payment_service),
 ):
     """
-    Receive and process Stripe webhook events.
+    Receive and process payment webhook events.
 
-    Access: Public (Stripe signs requests; no app auth required).
+    Access: Public (provider signs requests; no app auth required).
     """
-    return await payment_service.webhook_handler(request)
+    return await payment_service.webhook_handler(request=request, provider=provider)
+
+
+@router.get(
+    "/fake/checkout/{reference}",
+    response_class=RedirectResponse,
+    summary="Fake checkout page",
+    description="Redirects to the hosted fake payment template page.",
+)
+async def fake_checkout_page(
+    reference: str,
+):
+    return RedirectResponse(
+        url=f"/api/web/payments/link/{reference}",
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    )
+
+
+@router.post(
+    "/fake/checkout/{reference}/complete",
+    summary="Complete fake checkout",
+    description="Updates fake payment intent status and applies payment side effects to the linked ride.",
+)
+async def complete_fake_checkout(
+    reference: str,
+    status_value: str = Query(
+        "succeeded",
+        alias="status",
+        description="Final fake checkout status. Allowed values: `succeeded`, `failed`.",
+    ),
+    payment_service: PaymentService = Depends(get_payment_service),
+):
+    normalized = status_value.strip().lower()
+    if normalized not in {"succeeded", "failed"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="status must be either 'succeeded' or 'failed'",
+        )
+    return await payment_service.complete_fake_checkout(reference=reference, checkout_status=normalized)

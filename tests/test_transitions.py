@@ -16,7 +16,8 @@ def test_allowed_transitions_forward_only():
         (RideStatus.findingDriver, RideStatus.arrivingToPickup, True),
         (RideStatus.findingDriver, RideStatus.completed, False),
         (RideStatus.arrivingToPickup, RideStatus.pendingPayment, False),
-        (RideStatus.drivingToDestination, RideStatus.completed, True),
+        (RideStatus.drivingToDestination, RideStatus.completed, False),
+        (RideStatus.drivingToDestination, RideStatus.awaitingPayment, True),
     ],
 )
 def test_transition_matrix(current, target, valid):

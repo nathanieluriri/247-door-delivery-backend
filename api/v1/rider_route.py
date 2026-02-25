@@ -1,7 +1,8 @@
 import os
+import time
 from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
-from typing import List, Literal, Union
+from typing import List, Literal, Union, get_args
 from fastapi.responses import RedirectResponse
 from core.countries import ALLOWED_COUNTRIES
 from core.payments import PaymentService, get_payment_service
@@ -12,7 +13,7 @@ from schemas.imports import ResetPasswordConclusion, ResetPasswordInitiation, Re
 from schemas.place import FareBetweenPlacesCalculationRequest, FareBetweenPlacesCalculationResponse, Location, PlaceBase
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
-from schemas.ride import RideBase, RideCreate, RideOut, RideShareLinkOut, RideUpdate
+from schemas.ride import NoDriverDecisionIn, RideBase, RideCreate, RideOut, RideShareLinkOut, RideUpdate
 from schemas.tokens_schema import accessTokenOut
 from core.routing_config import maps
 from schemas.rider_schema import (
@@ -27,9 +28,15 @@ from schemas.rider_schema import (
 from repositories.tokens_repo import delete_access_token, delete_refresh_tokens_by_previous_access_token
 from security.account_status_checks import check_rider_account_status
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
-from services.place_service import calculate_fare_using_vehicle_config_and_distance, get_autocomplete, get_place_details, nearby_drivers
+from services.place_service import (
+    calculate_fare_using_vehicle_config_and_distance,
+    get_autocomplete,
+    get_place_details,
+    get_reverse_geocode,
+    nearby_drivers,
+)
 from services.rating_service import add_rating, retrieve_rating_by_user_id
-from services.ride_service import add_ride, generate_public_ride_sharing_link_for_rider, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, retrieve_shared_ride_by_share_id, update_ride_by_id
+from services.ride_service import add_ride, decide_no_driver_for_ride, generate_public_ride_sharing_link_for_rider, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, retrieve_shared_ride_by_share_id, update_ride_by_id
 from services.rider_service import (
     add_rider,
     remove_rider,
@@ -454,19 +461,20 @@ async def update_address_label(addressId:str,address_data:AddressUpdate,token:ac
 @router.get(
     "/place/allowedCountries",
     response_model=APIResponse[List[str]],
-    summary="Get location suggestions (cached for 14 days)",
+    summary="Get allowed countries for place lookup",
     description="Lists allowed countries used for place lookups.",
 )
-async def autocomplete_route(
-    input: str = Query(..., description="User input text for autocomplete"),
-    country: ALLOWED_COUNTRIES = Query(..., description="Choose one of them ")
-):
+async def allowed_countries():
     """
     List allowed countries for place lookups.
 
     Access: Public (no auth).
     """
-    return APIResponse(data=ALLOWED_COUNTRIES,details="Allowed Countries Retrieved",status_code=200)
+    return APIResponse(
+        data=list(get_args(ALLOWED_COUNTRIES)),
+        detail="Allowed countries retrieved",
+        status_code=200,
+    )
 
 
 @router.get(
@@ -503,6 +511,25 @@ async def place_details(
     Access: Public (no auth).
     """
     return await get_place_details(place_id)
+
+@router.get(
+    "/place/reverse-geocode",
+    response_model=APIResponse[Union[PlaceBase, None]],
+    summary="Resolve current coordinates to place_id",
+    description="Returns a place payload for supplied coordinates, including place_id.",
+)
+async def reverse_geocode(
+    lat: float = Query(..., ge=-90, le=90, description="Latitude in decimal degrees"),
+    lng: float = Query(..., ge=-180, le=180, description="Longitude in decimal degrees"),
+    country: ALLOWED_COUNTRIES | None = Query(None, description="Optional country filter"),
+):
+    """
+    Resolve latitude and longitude to a place structure that includes place_id.
+
+    Access: Public (no auth).
+    """
+    return await get_reverse_geocode(latitude=lat, longitude=lng, country=country)
+
 
 
 
@@ -583,8 +610,8 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
     Access: Rider only (valid rider access token required).
     """
 
-    pick_up = await get_place_details(place_id=data.pickup)
-    drop_off = await get_place_details(place_id=data.destination)
+    pick_up = await get_place_details(place_id=data.pickup.place_id) # type: ignore
+    drop_off = await get_place_details(place_id=data.destination.place_id) # type: ignore
    
     if not pick_up or not pick_up.data:
         raise HTTPException(status_code=400, detail="Invalid pickup location")
@@ -592,37 +619,47 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
         raise HTTPException(status_code=400, detail="Invalid destination location")
     
     origin = (pick_up.data["lat"],pick_up.data["lng"])
-    
-    available_drivers = await nearby_drivers(pickup_lat=pick_up.data["lat"],pickup_lon=pick_up.data["lng"])
-    
-    pickup_schedule = data.pickupSchedule or 0
-    if (available_drivers>0 and pickup_schedule==0) or (pickup_schedule and pickup_schedule>=240):
-        destination = (drop_off.data["lat"],drop_off.data["lng"])
-        stops=[]
-        if data.stops:
-            index=0
-            for stop in data.stops:
-                _place_details = await get_place_details(place_id=stop)
-                if _place_details and _place_details.data:
-                    stops.append((_place_details.data['lat'], _place_details.data['lng']))
-        
-        map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)
-        if not map:
-            raise HTTPException(status_code=400, detail="Unable to calculate route")
-        
-        vehicle = Vehicle[data.vehicleType.value]
-        price = calculate_fare_using_vehicle_config_and_distance(
-            distance=map.totalDistanceMeters,
-            time=map.totalDurationSeconds,
-            vehicle=vehicle,
+    now_ms = int(time.time() * 1000)
+    pickup_schedule_ms = int(data.pickupSchedule or 0)
+    if pickup_schedule_ms < 0:
+        raise HTTPException(status_code=400, detail="pickupSchedule must be 0 or a future Unix epoch in milliseconds")
+
+    is_scheduled = pickup_schedule_ms > 0
+    if is_scheduled and pickup_schedule_ms <= now_ms:
+        raise HTTPException(status_code=400, detail="pickupSchedule must be a future Unix epoch in milliseconds")
+
+    if not is_scheduled:
+        available_drivers = await nearby_drivers(
+            pickup_lat=pick_up.data["lat"],
+            pickup_lon=pick_up.data["lng"],
         )
-        ride_create= RideCreate(**data.model_dump(),userId=token.userId,price=price,origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),map=map)
-        
-        ride = await add_ride(ride_data=ride_create,payment_service=payment_service)
-        
-        return APIResponse(status_code=200,data=ride,detail="Successfully requested for a ride")
-    else:
-        raise HTTPException(status_code=404,detail="No Driver's available within 5km radius for pickup at this moment")
+        if available_drivers <= 0:
+            raise HTTPException(status_code=404,detail="No Driver's available within 5km radius for pickup at this moment")
+
+    destination = (drop_off.data["lat"],drop_off.data["lng"])
+    stops=[]
+    if data.stops:
+        index=0
+        for stop in data.stops:
+            _place_details = await get_place_details(place_id=stop)
+            if _place_details and _place_details.data:
+                stops.append((_place_details.data['lat'], _place_details.data['lng']))
+
+    map = maps.get_delivery_route(origin=origin,destination=destination,stops=stops)
+    if not map:
+        raise HTTPException(status_code=400, detail="Unable to calculate route")
+
+    vehicle = Vehicle[data.vehicleType.value]
+    price = calculate_fare_using_vehicle_config_and_distance(
+        distance=map.totalDistanceMeters,
+        time=map.totalDurationSeconds,
+        vehicle=vehicle,
+    )
+    ride_create= RideCreate(**data.model_dump(),userId=token.userId,price=price,origin=Location(latitude=pick_up.data["lat"],longitude=pick_up.data["lng"]),map=map)
+
+    ride = await add_ride(ride_data=ride_create,payment_service=payment_service)
+
+    return APIResponse(status_code=200,data=ride,detail="Successfully requested for a ride")
 
 @router.patch(
     "/ride/cancel/{rideId}",
@@ -641,6 +678,55 @@ async def cancel_a_requested_ride_before_ride_has_begun(rideId:str,token:accessT
     canceled_ride = RideUpdate(rideStatus=RideStatus.canceled)
     updated_ride = await update_ride_by_id(ride_id=rideId,rider_id=token.userId,ride_data=canceled_ride)
     return APIResponse(data =updated_ride ,status_code=200,detail="Successfully cancelled ride")
+
+
+@router.post(
+    "/ride/{rideId}/no-driver-decision",
+    response_model_exclude_none=True,
+    dependencies=[Depends(verify_token_rider_role), Depends(check_rider_account_status)],
+    response_model=APIResponse[RideOut],
+    summary="Handle no-driver decision",
+    description="Lets rider choose to keep searching or cancel when no driver is available at scheduled pickup time.",
+)
+async def handle_no_driver_decision(
+    rideId: str,
+    payload: NoDriverDecisionIn,
+    token: accessTokenOut = Depends(verify_token_rider_role),
+):
+    updated_ride = await decide_no_driver_for_ride(
+        ride_id=rideId,
+        rider_id=token.userId,
+        decision=payload.decision,
+    )
+    return APIResponse(
+        data=updated_ride,
+        status_code=200,
+        detail="No-driver decision recorded successfully",
+    )
+
+
+@router.post(
+    "/ride/{rideId}/payment/retry",
+    response_model_exclude_none=True,
+    dependencies=[Depends(verify_token_rider_role), Depends(check_rider_account_status)],
+    response_model=APIResponse[RideOut],
+    summary="Retry postpaid payment",
+    description="Reopens payment for rides currently in paymentFailed.",
+)
+async def retry_postpaid_payment(
+    rideId: str,
+    token: accessTokenOut = Depends(verify_token_rider_role),
+):
+    updated_ride = await update_ride_by_id(
+        ride_id=rideId,
+        rider_id=token.userId,
+        ride_data=RideUpdate(rideStatus=RideStatus.awaitingPayment),
+    )
+    return APIResponse(
+        data=updated_ride,
+        status_code=200,
+        detail="Payment retry initiated successfully",
+    )
  
 
 

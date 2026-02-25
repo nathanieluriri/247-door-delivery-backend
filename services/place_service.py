@@ -1,138 +1,240 @@
-# ============================================================================
-# PLACE SERVICE
-# ============================================================================
-# This file was auto-generated on: 2025-12-04 00:56:13 WAT
-# It contains  asynchrounous functions that make use of the repo functions 
-# 
-# ============================================================================
-from typing import Literal, Union
-import httpx
-import os
+from __future__ import annotations
+
+import asyncio
 import json
-import redis
+import math
+import os
+from typing import Any, Literal, Optional, Union
+
+import httpx
 from dotenv import load_dotenv
+from fastapi import HTTPException
+
 from core.redis_cache import cache_db
 from core.vehicles import Vehicle
 from schemas.response_schema import APIResponse
-from fastapi import HTTPException
-import math
+
 load_dotenv()
 
-# Google API setup
 API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
-BASE_URL = "https://maps.googleapis.com/maps/api/place"
+PLACE_BASE_URL = "https://maps.googleapis.com/maps/api/place"
+GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 EARTH_RADIUS_KM = 6371
- 
+CACHE_TTL = 14 * 24 * 60 * 60
+AUTOCOMPLETE_MIN_LENGTH = 2
+AUTOCOMPLETE_DETAILS_CONCURRENCY = 5
+PLACE_DETAILS_FIELDS = (
+    "place_id,name,formatted_address,geometry,types,rating,user_ratings_total,"
+    "icon,formatted_phone_number,website,opening_hours"
+)
 
-# Cache TTL: 14 days in seconds
-CACHE_TTL = 14 * 24 * 60 * 60  # 1209600 seconds
+
+def _ensure_api_key() -> str:
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="Google Maps API key not configured")
+    return API_KEY
+
+
+def _normalize_search_input(input_text: str) -> str:
+    return " ".join(input_text.strip().split())
+
+
+def _map_google_status_to_http(status: str) -> int:
+    return {
+        "INVALID_REQUEST": 400,
+        "OVER_QUERY_LIMIT": 429,
+        "REQUEST_DENIED": 403,
+    }.get(status, 502)
+
+
+def _raise_google_error(status: str, error_message: str | None = None) -> None:
+    message = error_message or status or "Google Places request failed"
+    raise HTTPException(status_code=_map_google_status_to_http(status), detail={"error": message})
+
+
+def _is_valid_coordinate(latitude: float, longitude: float) -> bool:
+    return -90 <= latitude <= 90 and -180 <= longitude <= 180
+
+
+def _autocomplete_cache_key(input_text: str, country: str | None) -> str:
+    return f"autocomplete:{country or 'any'}:{input_text.lower()}"
+
+
+def _reverse_geocode_cache_key(latitude: float, longitude: float, country: str | None) -> str:
+    return (
+        f"reverse_geocode:{latitude:.6f}:{longitude:.6f}:{(country or 'any').lower()}"
+    )
+
+
+def _build_place_details_cache_key(place_id: str) -> str:
+    return f"place_details:{place_id}"
+
+
+def _result_matches_country(result: dict[str, Any], country: str) -> bool:
+    country_code = country.lower()
+    for component in result.get("address_components", []):
+        if "country" in component.get("types", []) and (
+            str(component.get("short_name", "")).lower() == country_code
+        ):
+            return True
+    return False
+
+
+def _normalize_place_from_geocode(result: dict[str, Any]) -> Optional[dict[str, Any]]:
+    place_id = result.get("place_id")
+    location = result.get("geometry", {}).get("location", {})
+    lat = location.get("lat")
+    lng = location.get("lng")
+    formatted_address = result.get("formatted_address")
+
+    if not place_id or lat is None or lng is None:
+        return None
+
+    title = formatted_address or "Current location"
+    return {
+        "place_id": place_id,
+        "description": title,
+        "name": title,
+        "address": formatted_address or "",
+        "lat": lat,
+        "lng": lng,
+        "types": result.get("types", []),
+    }
+
+
+async def _enrich_prediction_with_details(
+    client: httpx.AsyncClient,
+    prediction: dict[str, Any],
+    semaphore: asyncio.Semaphore,
+    api_key: str,
+) -> Optional[dict[str, Any]]:
+    place_id = prediction.get("place_id")
+    if not place_id:
+        return None
+
+    details_params = {
+        "place_id": place_id,
+        "key": api_key,
+        "fields": PLACE_DETAILS_FIELDS,
+    }
+    async with semaphore:
+        details_response = await client.get(f"{PLACE_BASE_URL}/details/json", params=details_params)
+        details_data = details_response.json()
+
+    if details_data.get("status") != "OK":
+        return None
+
+    result = details_data.get("result", {})
+    lat = result.get("geometry", {}).get("location", {}).get("lat")
+    lng = result.get("geometry", {}).get("location", {}).get("lng")
+    if lat is None or lng is None:
+        return None
+
+    description = prediction.get("description")
+    if not description:
+        description = result.get("formatted_address", "")
+
+    return {
+        "place_id": place_id,
+        "description": description,
+        "name": result.get("name", prediction.get("structured_formatting", {}).get("main_text")),
+        "address": result.get("formatted_address", description),
+        "lat": lat,
+        "lng": lng,
+        "types": result.get("types", []),
+        "rating": result.get("rating"),
+        "user_ratings_total": result.get("user_ratings_total"),
+        "icon": result.get("icon"),
+    }
 
 
 async def get_autocomplete(input_text: str, country: str | None = None):
     """Fetch autocomplete suggestions from cache or Google Places API."""
-    if not API_KEY:
-        raise HTTPException(status_code=500, detail="Google Maps API key not configured")
-    cache_key = f"autocomplete:{country or 'any'}:{input_text.lower().strip()}"
-
-    # ✅ Check cache first
-    cached_data = cache_db.get(cache_key)
-    if cached_data:
-        results = json.loads(cached_data)
-        return APIResponse(
-            data=results,
-            detail="Successfully retrieved place data from cache",
-            status_code=200
+    api_key = _ensure_api_key()
+    normalized_input = _normalize_search_input(input_text)
+    if len(normalized_input) < AUTOCOMPLETE_MIN_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"input must be at least {AUTOCOMPLETE_MIN_LENGTH} characters",
         )
 
-    # 🔍 Not in cache — fetch from Google Places Autocomplete API
-    params = {"input": input_text, "key": API_KEY}
+    cache_key = _autocomplete_cache_key(normalized_input, country)
+    cached_data = cache_db.get(cache_key)
+    if cached_data:
+        return APIResponse(
+            data=json.loads(cached_data),
+            detail="Successfully retrieved place data from cache",
+            status_code=200,
+        )
+
+    params = {"input": normalized_input, "key": api_key}
     if country:
         params["components"] = f"country:{country}"
 
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/autocomplete/json", params=params)
+        response = await client.get(f"{PLACE_BASE_URL}/autocomplete/json", params=params)
         data = response.json()
+        status = data.get("status", "")
 
-    if data.get("status") != "OK":
-        raise HTTPException(
-            status_code=500,
-            detail={"error": data.get("error_message", data.get("status"))}
-        )
+        if status == "ZERO_RESULTS":
+            cache_db.setex(cache_key, CACHE_TTL, json.dumps([]))
+            return APIResponse(data=[], detail="No matching places found", status_code=200)
 
-    predictions = data.get("predictions", [])
-    results = []
+        if status != "OK":
+            _raise_google_error(status, data.get("error_message"))
 
-    # 🔍 Get details for each place to enrich with lat/lng, name, etc.
-    async with httpx.AsyncClient() as client:
-        for p in predictions:
-            place_id = p["place_id"]
+        predictions = data.get("predictions", [])
+        if not predictions:
+            cache_db.setex(cache_key, CACHE_TTL, json.dumps([]))
+            return APIResponse(data=[], detail="No matching places found", status_code=200)
 
-            # Fetch details for each autocomplete result
-            details_params = {"place_id": place_id, "key": API_KEY}
-            details_response = await client.get(f"{BASE_URL}/details/json", params=details_params)
-            details_data = details_response.json()
+        semaphore = asyncio.Semaphore(AUTOCOMPLETE_DETAILS_CONCURRENCY)
+        enrichment_tasks = [
+            _enrich_prediction_with_details(client, prediction, semaphore, api_key)
+            for prediction in predictions
+        ]
+        enriched_results = await asyncio.gather(*enrichment_tasks)
 
-            if details_data.get("status") != "OK":
-                continue
-
-            result = details_data.get("result", {})
-
-            enriched_place = {
-                "place_id": place_id,
-                "description": p["description"],
-                "name": result.get("name", p.get("structured_formatting", {}).get("main_text")),
-                "address": result.get("formatted_address", p["description"]),
-                "lat": result.get("geometry", {}).get("location", {}).get("lat"),
-                "lng": result.get("geometry", {}).get("location", {}).get("lng"),
-                "types": result.get("types", []),
-                "rating": result.get("rating"),
-                "user_ratings_total": result.get("user_ratings_total"),
-                "icon": result.get("icon"),
-            }
-            results.append(enriched_place)
-
-    # 💾 Store in Redis (cache enriched results)
+    results = [item for item in enriched_results if item is not None]
     cache_db.setex(cache_key, CACHE_TTL, json.dumps(results))
 
-    return APIResponse(
-        data=results,
-        detail="Successfully retrieved place data",
-        status_code=200
-    )
+    return APIResponse(data=results, detail="Successfully retrieved place data", status_code=200)
 
 
 async def get_place_details(place_id: str):
     """Fetch detailed place info from cache or Google Places API."""
-    if not API_KEY:
-        raise HTTPException(status_code=500, detail="Google Maps API key not configured")
-    cache_key = f"place_details:{place_id}"
+    api_key = _ensure_api_key()
+    normalized_place_id = place_id.strip()
+    if not normalized_place_id:
+        raise HTTPException(status_code=400, detail="place_id is required")
 
-    # ✅ Check cache first
+    cache_key = _build_place_details_cache_key(normalized_place_id)
     cached_data = cache_db.get(cache_key)
     if cached_data:
-        result_data = json.loads(cached_data)
         return APIResponse(
-            data=result_data,
+            data=json.loads(cached_data),
             detail="Successfully retrieved place data from cache",
-            status_code=200
+            status_code=200,
         )
 
-    # 🔍 Not in cache — fetch from Google
-    params = {"place_id": place_id, "key": API_KEY}
+    params = {
+        "place_id": normalized_place_id,
+        "key": api_key,
+        "fields": PLACE_DETAILS_FIELDS,
+    }
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/details/json", params=params)
+        response = await client.get(f"{PLACE_BASE_URL}/details/json", params=params)
         data = response.json()
 
-    if data.get("status") != "OK":
-        raise HTTPException(
-            status_code=500,
-            detail={"error": data.get("error_message", data.get("status"))}
-        )
+    status = data.get("status", "")
+    if status == "ZERO_RESULTS":
+        return APIResponse(data=None, detail="No place details found", status_code=200)
+    if status != "OK":
+        _raise_google_error(status, data.get("error_message"))
 
     result = data.get("result", {})
-
     result_data = {
-        "place_id": place_id,
+        "place_id": normalized_place_id,
         "name": result.get("name"),
         "address": result.get("formatted_address"),
         "lat": result.get("geometry", {}).get("location", {}).get("lat"),
@@ -146,48 +248,86 @@ async def get_place_details(place_id: str):
         "opening_hours": result.get("opening_hours", {}).get("weekday_text"),
     }
 
-    # 💾 Cache result
     cache_db.setex(cache_key, CACHE_TTL, json.dumps(result_data))
-
-    return APIResponse(
-        data=result_data,
-        detail="Successfully retrieved place data",
-        status_code=200
-    )
+    return APIResponse(data=result_data, detail="Successfully retrieved place data", status_code=200)
 
 
+async def get_reverse_geocode(latitude: float, longitude: float, country: str | None = None):
+    """Resolve a lat/lng coordinate to a place-like payload including place_id."""
+    api_key = _ensure_api_key()
+    if not _is_valid_coordinate(latitude, longitude):
+        raise HTTPException(status_code=400, detail="Invalid coordinates")
 
- 
+    normalized_country = country.lower() if country else None
+    lat_rounded = round(latitude, 6)
+    lng_rounded = round(longitude, 6)
+    cache_key = _reverse_geocode_cache_key(lat_rounded, lng_rounded, normalized_country)
+    cached_data = cache_db.get(cache_key)
+    if cached_data:
+        return APIResponse(
+            data=json.loads(cached_data),
+            detail="Successfully retrieved reverse geocode data from cache",
+            status_code=200,
+        )
+
+    params = {
+        "latlng": f"{lat_rounded:.6f},{lng_rounded:.6f}",
+        "key": api_key,
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get(GEOCODE_URL, params=params)
+        data = response.json()
+
+    status = data.get("status", "")
+    if status == "ZERO_RESULTS":
+        cache_db.setex(cache_key, CACHE_TTL, json.dumps(None))
+        return APIResponse(data=None, detail="No matching place found", status_code=200)
+    if status != "OK":
+        _raise_google_error(status, data.get("error_message"))
+
+    results: list[dict[str, Any]] = data.get("results", [])
+    if normalized_country:
+        ordered_results = [
+            *[result for result in results if _result_matches_country(result, normalized_country)],
+            *[result for result in results if not _result_matches_country(result, normalized_country)],
+        ]
+    else:
+        ordered_results = results
+
+    place_data = None
+    for result in ordered_results:
+        place_data = _normalize_place_from_geocode(result)
+        if place_data is not None:
+            break
+
+    cache_db.setex(cache_key, CACHE_TTL, json.dumps(place_data))
+
+    if place_data is None:
+        return APIResponse(data=None, detail="No matching place found", status_code=200)
+    return APIResponse(data=place_data, detail="Successfully reverse geocoded location", status_code=200)
 
 
 def calculate_fare_using_vehicle_config_and_distance(vehicle: Vehicle, distance: float, time: float) -> float:
-    
     v = vehicle.value
-    
-    return (v.base_fare + (v.distance_rate * distance) + (v.time_rate * time))
+    return v.base_fare + (v.distance_rate * distance) + (v.time_rate * time)
 
 
-
-
-
-
-async def nearby_drivers(pickup_lat:float,pickup_lon:float)->Union[Literal[0],int]:
+async def nearby_drivers(pickup_lat: float, pickup_lon: float) -> Union[Literal[0], int]:
     try:
-        # 1. Use Redis GEORADIUS to find nearby SIDs
         nearby_sids = cache_db.georadius(
             name="drivers:geo_index",
             longitude=pickup_lon,
             latitude=pickup_lat,
-            radius= 5.0,
-            unit="km"
+            radius=5.0,
+            unit="km",
         )
-        
+
         if not nearby_sids:
             print("⚠️ No drivers found nearby.")
             return 0
 
-        print(f"🔍 Found {len(nearby_sids)} drivers within { 5.0}km.")
+        print(f"🔍 Found {len(nearby_sids)} drivers within {5.0}km.")
         return len(nearby_sids)
-    except Exception as e:
-        print(f"❌ Error broadcasting ride: {e}")
+    except Exception as err:
+        print(f"❌ Error broadcasting ride: {err}")
         return 0

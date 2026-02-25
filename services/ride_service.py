@@ -14,7 +14,7 @@ from core.scheduler import scheduler
 from fastapi import status
 from bson import ObjectId
 from fastapi import Depends, HTTPException
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from datetime import timezone
 utc = timezone.utc
@@ -39,10 +39,53 @@ from services.driver_route_service import maybe_publish_driver_route_for_ride
 
 
 FRONTEND_SHARE_RIDE_URL = os.getenv("FRONTEND_SHARE_RIDE_URL", "http://localhost:8080/share/ride")
+SCHEDULED_DISPATCH_LEAD_SECONDS = int(os.getenv("SCHEDULED_DISPATCH_LEAD_SECONDS", "900"))
+SCHEDULED_MIN_LEAD_SECONDS = int(os.getenv("SCHEDULED_MIN_LEAD_SECONDS", "300"))
+NO_DRIVER_DECISION_WINDOW_SECONDS = int(os.getenv("NO_DRIVER_DECISION_WINDOW_SECONDS", "300"))
 
 
 def _ride_dispatch_job_id(ride_id: str) -> str:
     return f"ride_dispatch:{ride_id}"
+
+
+def _ride_activate_job_id(ride_id: str) -> str:
+    return f"ride_activate:{ride_id}"
+
+
+def _ride_no_driver_checkpoint_job_id(ride_id: str) -> str:
+    return f"ride_no_driver_checkpoint:{ride_id}"
+
+
+def _ride_no_driver_decision_timeout_job_id(ride_id: str) -> str:
+    return f"ride_no_driver_decision_timeout:{ride_id}"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _datetime_from_epoch_ms(value_ms: int) -> datetime:
+    return datetime.fromtimestamp(value_ms / 1000, tz=utc)
+
+
+def _format_place_for_dispatch(place: Any) -> str:
+    if isinstance(place, str):
+        return place
+    if isinstance(place, dict):
+        return (
+            place.get("formatted_address")
+            or place.get("address")
+            or place.get("name")
+            or place.get("place_id")
+            or "Unknown location"
+        )
+    return (
+        getattr(place, "formatted_address", None)
+        or getattr(place, "address", None)
+        or getattr(place, "name", None)
+        or getattr(place, "place_id", None)
+        or "Unknown location"
+    )
 
 
 async def _maybe_create_payout_for_completed_ride(ride: RideOut) -> None:
@@ -85,7 +128,7 @@ async def republish_ride_request_until_accepted(ride_id: str) -> None:
             pass
         return
 
-    if ride.rideStatus != RideStatus.findingDriver:
+    if ride.rideStatus != RideStatus.matching:
         try:
             scheduler.remove_job(_ride_dispatch_job_id(ride_id))
         except Exception:
@@ -96,9 +139,9 @@ async def republish_ride_request_until_accepted(ride_id: str) -> None:
     if ride.origin:
         pickup_location = (ride.origin.latitude, ride.origin.longitude)
     await publish_ride_request(
-        ride_id=ride.id,
-        pickup=ride.pickup,
-        destination=ride.destination,
+        ride_id=ride.id, # type: ignore
+        pickup=_format_place_for_dispatch(ride.pickup),
+        destination=_format_place_for_dispatch(ride.destination),
         vehicle_type=str(ride.vehicleType),
         fare_estimate=ride.price,
         rider_id=ride.userId,
@@ -106,169 +149,261 @@ async def republish_ride_request_until_accepted(ride_id: str) -> None:
     )
 
 
-async def check_if_state_is_still_pending_payment_and_delete_ride_if_it_is_still_pending_payment(ride_id:str):
-    from celery_worker import celery_app
-    print("Currently running the scheduled task check if state still pending payment")
-    filter_dict = {"_id": ObjectId(ride_id)}
-    ride =await get_ride(filter_dict=filter_dict)
-   
-    if ride:
-        if (ride.rideStatus==RideStatus.pendingPayment) and (ride.paymentStatus==False):
-            if ride.last_updated is None:
-                return
-            if time.time() - ride.last_updated >= 200:
-              
-                celery_app.send_task(
-                "celery_worker.run_async_task",
-                args=[
-                    "delete_ride",       # function path
-                    {"ride_id": ride_id} # kwargs
-                        ]
-                    )
-            else:
-                run_time = datetime.now(utc) + timedelta(seconds=240)
-                scheduler.add_job(
-                check_if_state_is_still_pending_payment_and_delete_ride_if_it_is_still_pending_payment,
-                trigger="date",run_date=run_time, kwargs={ "ride_id": ride.id },misfire_grace_time=31536000
-                )
-                pass
-        
-async def check_if_state_is_still_finding_driver_and_6_mins_have_passed_if_so_delete_the_ride(ride_id:str):
-    from celery_worker import celery_app
-    filter_dict = {"_id": ObjectId(ride_id)}
-    print("Currently running the scheduled task check if state still finding driver")
-    ride =await get_ride(filter_dict=filter_dict)
-    if ride:
-        if (ride.rideStatus==RideStatus.findingDriver):
-            if ride.last_updated is None:
-                return
-            if time.time() - ride.last_updated >= 300:
-                celery_app.send_task(
-                "celery_worker.run_async_task",
-                args=[
-                    "delete_ride",       # function path
-                    {"ride_id": ride_id} # kwargs
-                        ]
-                    )
-            else:
-                run_time = datetime.now(utc) + timedelta(seconds=240)
-                scheduler.add_job(
-                check_if_state_is_still_finding_driver_and_6_mins_have_passed_if_so_delete_the_ride,
-                trigger="date",run_date=run_time, kwargs={ "ride_id": ride.id },misfire_grace_time=31536000
-                )
-                 
-    
+def _schedule_dispatch_republish_job(ride_id: str) -> None:
+    scheduler.add_job(
+        republish_ride_request_until_accepted,
+        trigger="interval",
+        seconds=10,
+        kwargs={"ride_id": ride_id},
+        id=_ride_dispatch_job_id(ride_id),
+        replace_existing=True,
+    )
+
+
+def _schedule_scheduled_ride_jobs(ride_id: str, dispatch_start_ms: int, pickup_at_ms: int) -> None:
+    scheduler.add_job(
+        activate_scheduled_ride_for_matching,
+        trigger="date",
+        run_date=_datetime_from_epoch_ms(dispatch_start_ms),
+        kwargs={"ride_id": ride_id},
+        id=_ride_activate_job_id(ride_id),
+        replace_existing=True,
+        misfire_grace_time=31536000,
+    )
+    scheduler.add_job(
+        prompt_no_driver_decision_for_scheduled_ride,
+        trigger="date",
+        run_date=_datetime_from_epoch_ms(pickup_at_ms),
+        kwargs={"ride_id": ride_id},
+        id=_ride_no_driver_checkpoint_job_id(ride_id),
+        replace_existing=True,
+        misfire_grace_time=31536000,
+    )
+
+
+async def activate_scheduled_ride_for_matching(ride_id: str) -> None:
+    ride = await get_ride({"_id": ObjectId(ride_id)})
+    if not ride or ride.rideStatus != RideStatus.scheduled:
+        return
+
+    update_payload = RideUpdate(
+        rideStatus=RideStatus.matching,
+        noDriverDecision=None,
+        noDriverDecisionDeadlineMs=None,
+        last_updated=int(time.time()),
+    )
+    ride = await update_ride({"_id": ObjectId(ride_id)}, update_payload)
+
+    try:
+        pickup_location = None
+        if ride.origin:
+            pickup_location = (ride.origin.latitude, ride.origin.longitude)
+        await publish_ride_request(
+            ride_id=ride.id,  # type: ignore
+            pickup=_format_place_for_dispatch(ride.pickup),
+            destination=_format_place_for_dispatch(ride.destination),
+            vehicle_type=str(ride.vehicleType),
+            fare_estimate=ride.price,
+            rider_id=ride.userId,
+            pickup_location=pickup_location,
+        )
+        _schedule_dispatch_republish_job(ride_id)
+        await publish_ride_status_update(
+            ride_id=ride_id,
+            status=RideStatus.matching,
+            rider_id=ride.userId,
+            driver_id=ride.driverId,
+            message="Scheduled ride is now searching for drivers.",
+        )
+    except Exception:
+        pass
+
+
+async def prompt_no_driver_decision_for_scheduled_ride(ride_id: str) -> None:
+    ride = await get_ride({"_id": ObjectId(ride_id)})
+    if not ride:
+        return
+    if ride.rideStatus != RideStatus.matching or ride.driverId:
+        return
+
+    now_ms = _now_ms()
+    deadline_ms = now_ms + (NO_DRIVER_DECISION_WINDOW_SECONDS * 1000)
+    await update_ride(
+        {"_id": ObjectId(ride_id)},
+        RideUpdate(
+            noDriverPromptedAtMs=now_ms,
+            noDriverDecision=None,
+            noDriverDecisionDeadlineMs=deadline_ms,
+            last_updated=int(time.time()),
+        ),
+    )
+    scheduler.add_job(
+        resolve_no_driver_decision_timeout,
+        trigger="date",
+        run_date=_datetime_from_epoch_ms(deadline_ms),
+        kwargs={"ride_id": ride_id},
+        id=_ride_no_driver_decision_timeout_job_id(ride_id),
+        replace_existing=True,
+        misfire_grace_time=31536000,
+    )
+    try:
+        await publish_ride_status_update(
+            ride_id=ride_id,
+            status=RideStatus.matching,
+            rider_id=ride.userId,
+            driver_id=ride.driverId,
+            message=(
+                "No driver available at pickup time. "
+                "Choose Keep Searching or Cancel Ride in the app."
+            ),
+            action_required=True,
+            action_type="no_driver_decision",
+            decision_options=["keep_searching", "cancel_ride"],
+            action_deadline_ms=deadline_ms,
+            reason_code="no_driver_at_pickup",
+        )
+    except Exception:
+        pass
+
+
+async def resolve_no_driver_decision_timeout(ride_id: str) -> None:
+    ride = await get_ride({"_id": ObjectId(ride_id)})
+    if not ride:
+        return
+    if ride.rideStatus != RideStatus.matching:
+        return
+    if ride.noDriverDecision:
+        return
+
+    await update_ride(
+        {"_id": ObjectId(ride_id)},
+        RideUpdate(
+            noDriverDecision="keep_searching",
+            noDriverDecisionDeadlineMs=None,
+            last_updated=int(time.time()),
+        ),
+    )
+
+def _prepare_scheduling_fields(ride_data: RideCreate) -> RideCreate:
+    now_ms = _now_ms()
+    pickup_schedule_ms = int(ride_data.pickupSchedule or 0)
+    is_scheduled = pickup_schedule_ms > 0
+
+    if is_scheduled:
+        if pickup_schedule_ms <= now_ms:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pickupSchedule must be a future Unix epoch timestamp in milliseconds",
+            )
+        if pickup_schedule_ms - now_ms < (SCHEDULED_MIN_LEAD_SECONDS * 1000):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Scheduled rides must be at least {SCHEDULED_MIN_LEAD_SECONDS} seconds in the future",
+            )
+
+    dispatch_start_ms = (
+        max(now_ms, pickup_schedule_ms - (SCHEDULED_DISPATCH_LEAD_SECONDS * 1000))
+        if is_scheduled
+        else None
+    )
+    target_status = RideStatus.scheduled if is_scheduled else RideStatus.matching
+
+    return RideCreate(
+        **ride_data.model_dump(),
+        paymentStatus=False,
+        rideStatus=target_status,
+        isScheduled=is_scheduled,
+        scheduledPickupAtMs=pickup_schedule_ms if is_scheduled else None,
+        dispatchStartAtMs=dispatch_start_ms,
+        noDriverPromptedAtMs=None,
+        noDriverDecision=None,
+        noDriverDecisionDeadlineMs=None,
+        paymentDueAtMs=None,
+        paymentAttempts=0,
+        cancelReason=None,
+    )
+
+
+async def _dispatch_or_schedule_ride(ride: RideOut) -> None:
+    if not ride.id:
+        return
+
+    if ride.rideStatus == RideStatus.scheduled:
+        if not ride.scheduledPickupAtMs or not ride.dispatchStartAtMs:
+            return
+        _schedule_scheduled_ride_jobs(
+            ride_id=ride.id,
+            dispatch_start_ms=ride.dispatchStartAtMs,
+            pickup_at_ms=ride.scheduledPickupAtMs,
+        )
+        return
+
+    if ride.rideStatus != RideStatus.matching:
+        return
+
+    pickup_location = None
+    if ride.origin:
+        pickup_location = (ride.origin.latitude, ride.origin.longitude)
+    await publish_ride_request(
+        ride_id=ride.id,  # type: ignore
+        pickup=_format_place_for_dispatch(ride.pickup),
+        destination=_format_place_for_dispatch(ride.destination),
+        vehicle_type=str(ride.vehicleType),
+        fare_estimate=ride.price,
+        rider_id=ride.userId,
+        pickup_location=pickup_location,
+    )
+    _schedule_dispatch_republish_job(ride.id)
+
 
 async def add_ride(
     ride_data: RideCreate,
     payment_service: PaymentService = Depends(get_payment_service)
 ) -> RideOut:
     """Adds an entry of RideCreate to the database and returns an object."""
-    
+
+    _ = payment_service
     try:
         from services.rider_service import retrieve_rider_by_rider_id
+
         rider = await retrieve_rider_by_rider_id(id=ride_data.userId)
         if getattr(rider, "title", None) == "partner":
             ride_data = RideCreate(
                 **ride_data.model_dump(),
-                rideStatus=RideStatus.findingDriver,
+                rideStatus=RideStatus.matching,
                 paymentStatus=False,
             )
     except Exception:
         pass
-    
+
+    ride_data = _prepare_scheduling_fields(ride_data)
     await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
     ride = await create_ride(ride_data)
     if not ride.id:
         raise HTTPException(status_code=500, detail="Ride id missing after creation")
-    if ride_data.paymentStatus:
-        payment = None
-    else:
-        payment = await payment_service.create_payment_link(ride_id=ride.id)
-        ride = await update_ride(
-            {"_id": ObjectId(ride.id)},
-            RideUpdate(paymentLink=payment),
-        )
+
     try:
-        pickup_location = None
-        if ride.origin:
-            pickup_location = (ride.origin.latitude, ride.origin.longitude)
-        await publish_ride_request(
-            ride_id=ride.id,
-            pickup=ride.pickup,
-            destination=ride.destination,
-            vehicle_type=str(ride.vehicleType),
-            fare_estimate=ride.price,
-            rider_id=ride.userId,
-            pickup_location=pickup_location,
-        )
-        scheduler.add_job(
-            republish_ride_request_until_accepted,
-            trigger="interval",
-            seconds=10,
-            kwargs={"ride_id": ride.id},
-            id=_ride_dispatch_job_id(ride.id),
-            replace_existing=True,
-        )
+        await _dispatch_or_schedule_ride(ride)
     except Exception:
         pass
-    
-    pending_state_removal_run_time = datetime.now(utc) + timedelta(seconds=240)
-
-    scheduler.add_job(
-    check_if_state_is_still_pending_payment_and_delete_ride_if_it_is_still_pending_payment,
-    trigger="date",run_date=pending_state_removal_run_time, kwargs={ "ride_id": ride.id },misfire_grace_time=31536000
-    )
-    scheduler.add_job(
-    check_if_state_is_still_finding_driver_and_6_mins_have_passed_if_so_delete_the_ride,
-    trigger="date",run_date=pending_state_removal_run_time, kwargs={ "ride_id": ride.id },misfire_grace_time=31536000
-    )
     return ride
 
 
- 
 async def add_ride_admin_func(
     ride_data: RideCreate,
     payment_service: PaymentService = Depends(get_payment_service)
 ) -> RideOut:
     """Adds an entry of RideCreate to the database and returns an object."""
-    
- 
-    
+
+    _ = payment_service
+    ride_data = _prepare_scheduling_fields(ride_data)
     await check_if_user_has_an_existing_active_ride(user_id=ride_data.userId)
     ride = await create_ride(ride_data)
     if not ride.id:
         raise HTTPException(status_code=500, detail="Ride id missing after creation")
-    if ride_data.paymentStatus:
-        payment = None
-    else:
-        payment = await payment_service.create_payment_link(ride_id=ride.id)
-        ride = await update_ride(
-            {"_id": ObjectId(ride.id)},
-            RideUpdate(paymentLink=payment),
-        )
 
     try:
-        pickup_location = None
-        if ride.origin:
-            pickup_location = (ride.origin.latitude, ride.origin.longitude)
-        await publish_ride_request(
-            ride_id=ride.id,
-            pickup=ride.pickup,
-            destination=ride.destination,
-            vehicle_type=str(ride.vehicleType),
-            fare_estimate=ride.price,
-            rider_id=ride.userId,
-            pickup_location=pickup_location,
-        )
-        scheduler.add_job(
-            republish_ride_request_until_accepted,
-            trigger="interval",
-            seconds=10,
-            kwargs={"ride_id": ride.id},
-            id=_ride_dispatch_job_id(ride.id),
-            replace_existing=True,
-        )
+        await _dispatch_or_schedule_ride(ride)
     except Exception:
         pass
 
@@ -458,6 +593,105 @@ async def retrieve_rides(start=0,stop=100) -> List[RideOut]:
     return await get_rides(start=start,stop=stop)
 
 
+async def decide_no_driver_for_ride(ride_id: str, rider_id: str, decision: str) -> RideOut:
+    ride = await retrieve_rides_by_user_id_and_ride_id(user_id=rider_id, ride_id=ride_id)
+    if ride.rideStatus != RideStatus.matching:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ride is not currently in matching state",
+        )
+    if ride.noDriverDecisionDeadlineMs is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending no-driver decision exists for this ride",
+        )
+
+    normalized = decision.strip().lower()
+    if normalized not in {"keep_searching", "cancel_ride"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="decision must be either 'keep_searching' or 'cancel_ride'",
+        )
+
+    if normalized == "cancel_ride":
+        return await update_ride_by_id(
+            ride_id=ride_id,
+            rider_id=rider_id,
+            ride_data=RideUpdate(
+                rideStatus=RideStatus.canceled,
+                noDriverDecision=normalized,
+                noDriverDecisionDeadlineMs=None,
+                cancelReason="user_canceled_after_no_driver_prompt",
+            ),
+        )
+
+    return await update_ride_by_id(
+        ride_id=ride_id,
+        rider_id=rider_id,
+        ride_data=RideUpdate(
+            noDriverDecision=normalized,
+            noDriverDecisionDeadlineMs=None,
+        ),
+    )
+
+
+async def rehydrate_scheduled_ride_jobs() -> None:
+    now_ms = _now_ms()
+    open_rides = await get_rides(
+        filter_dict={
+            "rideStatus": {
+                "$in": [
+                    RideStatus.scheduled.value,
+                    RideStatus.matching.value,
+                    RideStatus.findingDriver.value,
+                ]
+            },
+        },
+        start=0,
+        stop=1000,
+    )
+    for ride in open_rides:
+        if not ride.id:
+            continue
+        try:
+            if ride.rideStatus == RideStatus.scheduled:
+                if not ride.scheduledPickupAtMs:
+                    continue
+                dispatch_start_ms = ride.dispatchStartAtMs or max(
+                    now_ms,
+                    ride.scheduledPickupAtMs - (SCHEDULED_DISPATCH_LEAD_SECONDS * 1000),
+                )
+                _schedule_scheduled_ride_jobs(
+                    ride_id=ride.id,
+                    dispatch_start_ms=dispatch_start_ms,
+                    pickup_at_ms=ride.scheduledPickupAtMs,
+                )
+            elif ride.rideStatus == RideStatus.matching:
+                _schedule_dispatch_republish_job(ride.id)
+                if (
+                    ride.noDriverDecisionDeadlineMs
+                    and ride.noDriverDecision is None
+                    and ride.noDriverDecisionDeadlineMs > now_ms
+                ):
+                    scheduler.add_job(
+                        resolve_no_driver_decision_timeout,
+                        trigger="date",
+                        run_date=_datetime_from_epoch_ms(ride.noDriverDecisionDeadlineMs),
+                        kwargs={"ride_id": ride.id},
+                        id=_ride_no_driver_decision_timeout_job_id(ride.id),
+                        replace_existing=True,
+                        misfire_grace_time=31536000,
+                    )
+            elif ride.rideStatus == RideStatus.findingDriver:
+                await update_ride(
+                    {"_id": ObjectId(ride.id)},
+                    RideUpdate(rideStatus=RideStatus.matching, last_updated=int(time.time())),
+                )
+                _schedule_dispatch_republish_job(ride.id)
+        except Exception:
+            continue
+
+
 async def update_ride_by_id(
     ride_id: str,
     ride_data: RideUpdate,
@@ -487,7 +721,7 @@ async def update_ride_by_id(
     filter_dict = {"_id": ObjectId(ride_id)}
 
     if rider_id:
-        filter_dict["userId"] = rider_id
+        filter_dict["userId"] = rider_id # type: ignore
 
     # Driver concurrency guard:
     # - If ride already has a driver and it's not this driver, block.
@@ -499,7 +733,7 @@ async def update_ride_by_id(
                 detail="Ride already assigned to another driver",
             )
         if ride.driverId:
-            filter_dict["driverId"] = driver_id
+            filter_dict["driverId"] = driver_id # type: ignore
 
     # 4️⃣ Prevent no-op updates
     if (
@@ -517,8 +751,8 @@ async def update_ride_by_id(
         target_status = ride_data.rideStatus
 
         allowed_next_states = ALLOWED_RIDE_STATUS_TRANSITIONS.get(
-            current_status, set()
-        )
+            current_status, set() # type: ignore
+        ) # type: ignore
 
         if target_status not in allowed_next_states:
             raise HTTPException(
@@ -528,7 +762,7 @@ async def update_ride_by_id(
 
         # 6️⃣ Apply refund side-effects if applicable
         refund_percentage = RIDE_REFUND_RULES.get(
-            (current_status, target_status)
+            (current_status, target_status) # type: ignore
         )
 
         if refund_percentage is not None:
@@ -567,6 +801,24 @@ async def update_ride_by_id(
                     ),
                 )
 
+    if ride_data.rideStatus == RideStatus.awaitingPayment:
+        try:
+            payment_service = get_payment_service()
+            payment_link = await payment_service.create_payment_link(ride_id=ride_id)
+            ride_data = ride_data.model_copy(
+                update={
+                    "paymentLink": payment_link,
+                    "paymentDueAtMs": _now_ms(),
+                    "paymentAttempts": (ride.paymentAttempts or 0) + 1,
+                    "last_updated": int(time.time()),
+                }
+            )
+        except Exception as err:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to create postpaid payment link: {err}",
+            ) from err
+
     # 7️⃣ Perform update
     result = await update_ride(filter_dict, ride_data)
 
@@ -590,7 +842,10 @@ async def update_ride_by_id(
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
 
         # Record acceptance timing when a driver takes the ride
-        if ride.rideStatus == RideStatus.findingDriver and ride_data.rideStatus == RideStatus.arrivingToPickup:
+        if (
+            ride.rideStatus in {RideStatus.findingDriver, RideStatus.matching}
+            and ride_data.rideStatus == RideStatus.arrivingToPickup
+        ):
             try:
                 started = ride.date_created or ride.last_updated
                 if started:
@@ -639,7 +894,15 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
     
     filter_dict["_id"] = ObjectId(ride_id)
     # CANCEL OF RIDE CASES
-    if (ride.rideStatus==RideStatus.findingDriver or ride.rideStatus==RideStatus.pendingPayment) and (ride_data.rideStatus==RideStatus.canceled):
+    if (
+        ride.rideStatus in {
+            RideStatus.scheduled,
+            RideStatus.matching,
+            RideStatus.findingDriver,
+            RideStatus.pendingPayment,
+            RideStatus.arrivingToPickup,
+        }
+    ) and (ride_data.rideStatus==RideStatus.canceled):
         try:
             if ride.paymentStatus:
                 payment_service = get_payment_service()
@@ -658,6 +921,23 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
         except Exception as e:
             raise HTTPException(status_code=500,detail=f"Exception occured while processing a refund due to a canceled ride in 'update_ride_by_id_admin_func' {e}")    
         
+    if ride_data.rideStatus == RideStatus.awaitingPayment:
+        try:
+            payment_service = get_payment_service()
+            payment_link = await payment_service.create_payment_link(ride_id=ride_id)
+            ride_data = ride_data.model_copy(
+                update={
+                    "paymentLink": payment_link,
+                    "paymentDueAtMs": _now_ms(),
+                    "paymentAttempts": (ride.paymentAttempts or 0) + 1,
+                    "last_updated": int(time.time()),
+                }
+            )
+        except Exception as err:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to create postpaid payment link: {err}",
+            ) from err
         
     result = await update_ride(filter_dict, ride_data)
     if not result:
@@ -726,13 +1006,32 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
             )
         if current_ride:
             allowed_next_states = ALLOWED_RIDE_STATUS_TRANSITIONS.get(
-                current_ride.rideStatus, set()
-            )
+                current_ride.rideStatus, set() # type: ignore
+            ) # type: ignore
             if ride_data.rideStatus not in allowed_next_states:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid ride status transition: {current_ride.rideStatus} → {ride_data.rideStatus}",
                 )
+
+    if ride_data.rideStatus == RideStatus.awaitingPayment:
+        try:
+            payment_service = get_payment_service()
+            payment_link = await payment_service.create_payment_link(ride_id=ride_id)
+            payment_attempts = (current_ride.paymentAttempts or 0) + 1 if current_ride else 1
+            ride_data = ride_data.model_copy(
+                update={
+                    "paymentLink": payment_link,
+                    "paymentDueAtMs": _now_ms(),
+                    "paymentAttempts": payment_attempts,
+                    "last_updated": int(time.time()),
+                }
+            )
+        except Exception as err:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to create postpaid payment link: {err}",
+            ) from err
 
     result = await update_ride(filter_dict, ride_data)
     if not result:

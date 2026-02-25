@@ -49,8 +49,12 @@ class PermissionList(BaseModel):
 class RideStatus(str, Enum):
     pendingPayment="pendingPayment"
     findingDriver="findingDriver"
+    scheduled="scheduled"
+    matching="matching"
     arrivingToPickup="arrivingToPickup"
     drivingToDestination="drivingToDestination"
+    awaitingPayment="awaitingPayment"
+    paymentFailed="paymentFailed"
     canceled = "canceled"
     completed="completed"
     
@@ -118,7 +122,16 @@ class InvoiceData(BaseModel):
  
 ALLOWED_RIDE_STATUS_TRANSITIONS: dict[RideStatus, set[RideStatus]] = {
     RideStatus.pendingPayment: {
+        RideStatus.matching,
         RideStatus.findingDriver,
+        RideStatus.canceled,
+    },
+    RideStatus.scheduled: {
+        RideStatus.matching,
+        RideStatus.canceled,
+    },
+    RideStatus.matching: {
+        RideStatus.arrivingToPickup,
         RideStatus.canceled,
     },
     RideStatus.findingDriver: {
@@ -130,6 +143,14 @@ ALLOWED_RIDE_STATUS_TRANSITIONS: dict[RideStatus, set[RideStatus]] = {
         RideStatus.canceled,
     },
     RideStatus.drivingToDestination: {
+        RideStatus.awaitingPayment,
+    },
+    RideStatus.awaitingPayment: {
+        RideStatus.completed,
+        RideStatus.paymentFailed,
+    },
+    RideStatus.paymentFailed: {
+        RideStatus.awaitingPayment,
         RideStatus.completed,
     },
     RideStatus.canceled: set(),   # terminal
@@ -139,6 +160,8 @@ ALLOWED_RIDE_STATUS_TRANSITIONS: dict[RideStatus, set[RideStatus]] = {
 
 RIDE_REFUND_RULES: dict[tuple[RideStatus, RideStatus], float] = {
     (RideStatus.pendingPayment, RideStatus.canceled): 0.95,
+    (RideStatus.scheduled, RideStatus.canceled): 1.0,
+    (RideStatus.matching, RideStatus.canceled): 0.90,
     (RideStatus.findingDriver, RideStatus.canceled): 0.90,
     (RideStatus.arrivingToPickup, RideStatus.canceled): 0.75,
 }

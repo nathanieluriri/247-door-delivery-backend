@@ -33,6 +33,11 @@ class RideStatusUpdate(BaseModel):
     status: RideStatus
     message: Optional[str] = None
     eta_minutes: Optional[int] = Field(default=None, alias="etaMinutes")
+    action_required: Optional[bool] = Field(default=None, alias="actionRequired")
+    action_type: Optional[str] = Field(default=None, alias="actionType")
+    decision_options: Optional[list[str]] = Field(default=None, alias="decisionOptions")
+    action_deadline_ms: Optional[int] = Field(default=None, alias="actionDeadlineMs")
+    reason_code: Optional[str] = Field(default=None, alias="reasonCode")
 
     model_config = {"populate_by_name": True}
 

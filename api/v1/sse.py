@@ -12,6 +12,11 @@ from services.sse_service import ack_event, stream_events
 
 
 router = APIRouter(prefix="/sse", tags=["SSE"])
+SSE_RESPONSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 @router.get(
@@ -23,6 +28,10 @@ async def stream_driver_events(
     request: Request,
     ride_id: Optional[str] = Query(default=None),
     event_types: Optional[List[SSEEventType]] = Query(default=None),
+    last_event_id: Optional[str] = Query(
+        default=None,
+        description="Optional replay cursor for reconnecting streams",
+    ),
     token: accessTokenOut = Depends(verify_token_driver_role),
     _driver: object = Depends(check_driver_sse_eligibility),
 ):
@@ -39,8 +48,10 @@ async def stream_driver_events(
             user_id=token.userId,
             event_types=allowed_types,
             ride_id=ride_id,
+            last_event_id=last_event_id,
         ),
         media_type="text/event-stream",
+        headers=SSE_RESPONSE_HEADERS,
     )
 
 
@@ -71,6 +82,10 @@ async def stream_rider_events(
     request: Request,
     ride_id: Optional[str] = Query(default=None),
     event_types: Optional[List[SSEEventType]] = Query(default=None),
+    last_event_id: Optional[str] = Query(
+        default=None,
+        description="Optional replay cursor for reconnecting streams",
+    ),
     token: accessTokenOut = Depends(verify_token_rider_role),
 ):
     """
@@ -86,8 +101,10 @@ async def stream_rider_events(
             user_id=token.userId,
             event_types=allowed_types,
             ride_id=ride_id,
+            last_event_id=last_event_id,
         ),
         media_type="text/event-stream",
+        headers=SSE_RESPONSE_HEADERS,
     )
 
 

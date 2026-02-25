@@ -768,7 +768,7 @@ async def start_ride(
     "/ride/{ride_id}/complete",
     dependencies=[Depends(check_driver_sse_eligibility)],
     summary="Complete a ride",
-    description="Transitions ride from drivingToDestination to completed.",
+    description="Transitions ride from drivingToDestination to awaitingPayment.",
 )
 async def complete_ride(
     ride_id: str,
@@ -780,7 +780,7 @@ async def complete_ride(
     Access: Driver only (valid driver access token + SSE eligibility required).
     """
     ride_update = RideUpdate(
-        rideStatus=RideStatus.completed
+        rideStatus=RideStatus.awaitingPayment
     )
 
     updated_ride = await update_ride_by_id(
@@ -792,7 +792,7 @@ async def complete_ride(
     return APIResponse(
         status_code=200,
         data=updated_ride,
-        detail="Ride completed successfully"
+        detail="Ride completed; awaiting customer payment"
     )
     
     
@@ -1197,7 +1197,7 @@ async def record_ride_earnings(
     if not ride_found:
         raise HTTPException(status_code=404, detail="Ride not found or doesn't belong to this driver")
 
-    if ride_found.rideStatus != "COMPLETED":
+    if ride_found.rideStatus != RideStatus.completed:
         raise HTTPException(status_code=400, detail="Ride must be completed to record earnings")
 
     # Record the earnings
