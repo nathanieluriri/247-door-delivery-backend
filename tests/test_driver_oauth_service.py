@@ -59,7 +59,8 @@ async def test_authenticate_driver_oauth_existing_password_driver_succeeds_witho
 async def test_authenticate_driver_oauth_missing_email_fails(monkeypatch):
     called = {"get_driver": False}
 
-    async def fake_get_driver(_filter_dict: dict):
+    async def fake_get_driver(filter_dict: dict):
+        assert isinstance(filter_dict, dict)
         called["get_driver"] = True
         return None
 
@@ -76,7 +77,8 @@ async def test_authenticate_driver_oauth_missing_email_fails(monkeypatch):
 async def test_authenticate_driver_oauth_unverified_email_fails(monkeypatch):
     called = {"get_driver": False}
 
-    async def fake_get_driver(_filter_dict: dict):
+    async def fake_get_driver(filter_dict: dict):
+        assert isinstance(filter_dict, dict)
         called["get_driver"] = True
         return None
 
@@ -113,7 +115,8 @@ async def test_authenticate_driver_oauth_driver_not_found_fails(monkeypatch):
 async def test_authenticate_driver_wrong_password_still_fails(monkeypatch):
     driver = DummyDriver(password="hashed-password")
 
-    async def fake_get_driver(_filter_dict: dict):
+    async def fake_get_driver(filter_dict: dict):
+        assert filter_dict == {"email": "driver@example.com"}
         return driver
 
     monkeypatch.setattr(driver_service, "get_driver", fake_get_driver)

@@ -40,6 +40,21 @@ def test_resolve_return_url_allows_relative_path():
     assert resolved == "http://localhost:8080/auth/complete?from=google"
 
 
+def test_resolve_return_url_allows_local_cross_frontend_ports():
+    driver_resolved = resolve_return_url_or_raise(
+        role="driver",
+        backend_host="localhost",
+        next_url="http://localhost:8080/driver/wallet",
+    )
+    rider_resolved = resolve_return_url_or_raise(
+        role="rider",
+        backend_host="localhost",
+        next_url="http://localhost:8000/auth/complete",
+    )
+    assert driver_resolved == "http://localhost:8080/driver/wallet"
+    assert rider_resolved == "http://localhost:8000/auth/complete"
+
+
 def test_resolve_return_url_rejects_non_allowlisted_origin():
     try:
         resolve_return_url_or_raise(

@@ -107,7 +107,8 @@ def test_driver_google_callback_new_driver_created_when_oauth_auth_not_found(mon
     )
     captured = {}
 
-    async def fake_authenticate_driver_oauth(_email: str, email_verified: bool | None = None):
+    async def fake_authenticate_driver_oauth(email: str, email_verified: bool | None = None):
+        assert email == "newdriver@example.com"
         assert email_verified is True
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -201,7 +202,8 @@ def test_driver_google_callback_unverified_email_redirects_callback_failed(monke
         FakeOAuth({"email": "driver@example.com", "email_verified": False}),
     )
 
-    async def fake_authenticate_driver_oauth(_email: str, email_verified: bool | None = None):
+    async def fake_authenticate_driver_oauth(email: str, email_verified: bool | None = None):
+        assert email == "driver@example.com"
         assert email_verified is False
         raise HTTPException(status_code=401, detail="Unverified email")
 

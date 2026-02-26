@@ -76,6 +76,19 @@ def resolve_default_frontend_base(role: Role, backend_host: str) -> str:
 def _allowlisted_origins(role: Role, backend_host: str) -> set[str]:
     base_url = resolve_default_frontend_base(role=role, backend_host=backend_host)
     defaults = {_normalize_origin(base_url)} if _normalize_origin(base_url) else set()
+    host = (backend_host or "").split(":", 1)[0].lower()
+    if host in {"localhost", "127.0.0.1"}:
+        # Local development often runs rider/driver frontends on different ports.
+        local_driver = _normalize_origin(
+            os.getenv("DRIVER_FRONTEND_URL_LOCAL", "http://localhost:8000")
+        )
+        local_rider = _normalize_origin(
+            os.getenv("RIDER_FRONTEND_URL_LOCAL", "http://localhost:8080")
+        )
+        if local_driver:
+            defaults.add(local_driver)
+        if local_rider:
+            defaults.add(local_rider)
     shared_origins = _csv_to_origins(os.getenv("RETURN_URL_ALLOWLIST"))
     role_key = (
         "RIDER_RETURN_URL_ALLOWLIST" if role == "rider" else "DRIVER_RETURN_URL_ALLOWLIST"
