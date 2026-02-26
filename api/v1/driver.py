@@ -53,6 +53,7 @@ from services.driver_service import (
     remove_driver,
     retrieve_drivers,
     authenticate_driver,
+    authenticate_driver_oauth,
     retrieve_driver_by_driver_id,
     update_driver,
     update_driver_by_id,
@@ -225,36 +226,58 @@ async def auth_callback(request: Request):
             return RedirectResponse(url=mismatch_url, status_code=status.HTTP_302_FOUND)
     final_return_url = session_return_url or state_return_url
 
-    # Just print or return user info for now
-    if user_info:
-        new_data= DriverCreate(email=user_info["email"],password="",)
-        old_data= DriverBase(email=user_info["email"],password="",)
-        try:
-            driver = await add_driver(driver_data=new_data)
-        except:
-            driver = await authenticate_driver(user_data=old_data)
-        # user_info.get("email_verified",False)
-        # user_info.get("given_name",None)
-        # user_info.get("family_name",None)
-        # user_info.get("picture",None)
-        access_token = driver.access_token
-        refresh_token = driver.refresh_token
-        success_url = append_query_params(
-            final_return_url,
-            {
-                "status": "success",
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-            },
-        )
-        return RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
-    else:
+    if not user_info:
         error_url = append_query_params(
             ERROR_PAGE_URL
             or resolve_default_frontend_base("driver", backend_host=backend_host),
             {"status": "failed", "reason": "oauth_user_info_missing"},
         )
         return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
+
+    email_value = str(user_info.get("email") or "").strip()
+    if not email_value:
+        error_url = append_query_params(
+            ERROR_PAGE_URL
+            or resolve_default_frontend_base("driver", backend_host=backend_host),
+            {"status": "failed", "reason": "oauth_user_info_missing"},
+        )
+        return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
+
+    try:
+        driver = await authenticate_driver_oauth(
+            email=email_value,
+            email_verified=user_info.get("email_verified"),
+        )
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+        first_name = str(user_info.get("given_name") or "").strip()
+        last_name = str(user_info.get("family_name") or "").strip()
+        try:
+            driver = await add_driver(
+                driver_data=DriverCreate(
+                    email=email_value,
+                    password="",
+                    firstName=first_name,
+                    lastName=last_name,
+                )
+            )
+        except Exception:
+            return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+    except Exception:
+        return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+
+    access_token = driver.access_token
+    refresh_token = driver.refresh_token
+    success_url = append_query_params(
+        final_return_url,
+        {
+            "status": "success",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        },
+    )
+    return RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
 
 
 

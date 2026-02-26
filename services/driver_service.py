@@ -139,23 +139,49 @@ async def retrieve_drivers(start=0,stop=100) -> List[DriverOut]:
     """
     return await get_drivers(start=start,stop=stop)
 
+
+async def _issue_driver_tokens(user: DriverOut) -> DriverOut:
+    access_token = await add_access_tokens(token_data=accessTokenCreate(userId=user.id))
+    token_activation = user.accountStatus == AccountStatus.ACTIVE
+    token = create_jwt_token(
+        access_token=access_token.accesstoken,
+        user_id=user.id,
+        user_type="DRIVER",
+        is_activated=token_activation,
+    )
+    refresh_token = await add_refresh_tokens(
+        token_data=refreshTokenCreate(
+            userId=user.id,
+            previousAccessToken=access_token.accesstoken,
+        )
+    )
+    user.access_token = token
+    user.refresh_token = refresh_token.refreshtoken
+    return user
+
 async def authenticate_driver(user_data:DriverBase )->DriverOut:
     user = await get_driver(filter_dict={"email":user_data.email.lower()})
 
     if user != None:
         if check_password(password=user_data.password,hashed=user.password ):
-          
-            access_token = await add_access_tokens(token_data=accessTokenCreate(userId=user.id))
-            token_activation = user.accountStatus==AccountStatus.ACTIVE
-            token = create_jwt_token(access_token=access_token.accesstoken,user_id=user.id,user_type="DRIVER",is_activated=token_activation)
-            refresh_token  = await add_refresh_tokens(token_data=refreshTokenCreate(userId=user.id,previousAccessToken=access_token.accesstoken))
-            user.access_token= token
-            user.refresh_token = refresh_token.refreshtoken
-            return user
+            return await _issue_driver_tokens(user)
         else:
             raise HTTPException(status_code=401, detail="Unathorized, Invalid Login credentials")
     else:
         raise HTTPException(status_code=404,detail="User not found")
+
+
+async def authenticate_driver_oauth(email: str, email_verified: bool | None = None) -> DriverOut:
+    normalized_email = email.strip().lower()
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="Driver email is required")
+    if email_verified is not True:
+        raise HTTPException(status_code=401, detail="Unathorized, Google email is not verified")
+
+    user = await get_driver(filter_dict={"email": normalized_email})
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return await _issue_driver_tokens(user)
 
 
 
