@@ -15,19 +15,11 @@ from logging.config import dictConfig
 from prometheus_fastapi_instrumentator import Instrumentator
 from middlewares.structured_logging_middleware import StructuredLoggingMiddleware
 from pymongo import ASCENDING
-from celery_worker import celery_app
 from contextlib import asynccontextmanager
-from core.scheduler import scheduler
 from pymongo import MongoClient
 import redis
 from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
-from core.database import db
-from core.payments import configure_payment_manager
-from redis_om import Migrator
-from starlette.concurrency import run_in_threadpool
-from services.sse_service import publish_ride_request, cleanup_stale_driver_locations
-from services.ride_service import rehydrate_scheduled_ride_jobs
 from middlewares.rate_limiting_middleware import RateLimitingMiddleware
 MONGO_URI = os.getenv("MONGO_URL")
 REDIS_URI = f"redis://{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/0"
@@ -54,8 +46,12 @@ REHYDRATE_IN_BACKGROUND = _flag("REHYDRATE_IN_BACKGROUND", True)
 REHYDRATE_TIMEOUT_SECONDS = _float_setting("REHYDRATE_TIMEOUT_SECONDS", 20.0)
 STARTUP_INDEXES_IN_BACKGROUND = _flag("STARTUP_INDEXES_IN_BACKGROUND", True)
 STARTUP_INDEX_TIMEOUT_SECONDS = _float_setting("STARTUP_INDEX_TIMEOUT_SECONDS", 20.0)
+MINIMAL_BOOT_MODE = _flag("MINIMAL_BOOT_MODE", False)
 startup_logger = logging.getLogger("app.startup")
 async def _run_migrator() -> None:
+    from redis_om import Migrator
+    from starlette.concurrency import run_in_threadpool
+
     started = time.perf_counter()
     await run_in_threadpool(Migrator().run)
     startup_logger.info(
@@ -63,6 +59,8 @@ async def _run_migrator() -> None:
         extra={"duration_ms": round((time.perf_counter() - started) * 1000, 2)},
     )
 async def _run_rehydrate_jobs() -> None:
+    from services.ride_service import rehydrate_scheduled_ride_jobs
+
     started = time.perf_counter()
     if REHYDRATE_TIMEOUT_SECONDS > 0:
         await asyncio.wait_for(
@@ -78,6 +76,8 @@ async def _run_rehydrate_jobs() -> None:
 
 
 async def _ensure_startup_indexes() -> None:
+    from core.database import db
+
     started = time.perf_counter()
     await asyncio.gather(
         db.stripe_events.create_index(
@@ -122,74 +122,76 @@ async def _run_background_startup_step(step: str, runner) -> None:
 def apscheduler_heartbeat():
         timestamp = time.time()
         redis_client.set("apscheduler:heartbeat", str(timestamp), ex=60)  # expires in 60s
-@asynccontextmanager
-async def lifespan(app:FastAPI):
-    startup_started = time.perf_counter()
-    app.state.startup_background_tasks = []
-    # --- Add Heartbeat Job ---
-    scheduler.add_job(
-        apscheduler_heartbeat,
-        trigger=IntervalTrigger(seconds=105),
-        id="apscheduler_heartbeat",
-        name="APScheduler Heartbeat",
-        replace_existing=True
-    )
-    scheduler.add_job(
-        cleanup_stale_driver_locations,
-        trigger=IntervalTrigger(seconds=180),
-        id="driver_presence_cleanup",
-        name="Remove stale driver geo entries",
-        replace_existing=True,
-    )
-    if STARTUP_INDEXES_IN_BACKGROUND:
-        app.state.startup_background_tasks.append(
-            asyncio.create_task(
-                _run_background_startup_step("ensure_indexes", _ensure_startup_indexes),
-                name="startup:ensure_indexes",
-            )
-        )
-    else:
-        if STARTUP_INDEX_TIMEOUT_SECONDS > 0:
-            await asyncio.wait_for(
-                _ensure_startup_indexes(),
-                timeout=STARTUP_INDEX_TIMEOUT_SECONDS,
-            )
-        else:
-            await _ensure_startup_indexes()
-    configure_payment_manager(force=True)
-    scheduler.start()
-    if RUN_STARTUP_MIGRATOR:
-        if MIGRATOR_IN_BACKGROUND:
-            app.state.startup_background_tasks.append(
-                asyncio.create_task(
-                    _run_background_startup_step("migrator", _run_migrator),
-                    name="startup:migrator",
-                )
-            )
-        else:
-            await _run_migrator()
-    if REHYDRATE_IN_BACKGROUND:
-        app.state.startup_background_tasks.append(
-            asyncio.create_task(
-                _run_background_startup_step("rehydrate_scheduled_rides", _run_rehydrate_jobs),
-                name="startup:rehydrate_scheduled_rides",
-            )
-        )
-    else:
-        await _run_rehydrate_jobs()
-    startup_logger.info(
-        "startup_ready",
-        extra={"duration_ms": round((time.perf_counter() - startup_started) * 1000, 2)},
-    )
-    try:
-        yield
-    finally:
-        for task in app.state.startup_background_tasks:
-            if not task.done():
-                task.cancel()
-        if app.state.startup_background_tasks:
-            await asyncio.gather(*app.state.startup_background_tasks, return_exceptions=True)
-        scheduler.shutdown()
+        
+        
+# @asynccontextmanager
+# async def lifespan(app:FastAPI):
+#     startup_started = time.perf_counter()
+#     app.state.startup_background_tasks = []
+#     # --- Add Heartbeat Job ---
+#     scheduler.add_job(
+#         apscheduler_heartbeat,
+#         trigger=IntervalTrigger(seconds=105),
+#         id="apscheduler_heartbeat",
+#         name="APScheduler Heartbeat",
+#         replace_existing=True
+#     )
+#     scheduler.add_job(
+#         cleanup_stale_driver_locations,
+#         trigger=IntervalTrigger(seconds=180),
+#         id="driver_presence_cleanup",
+#         name="Remove stale driver geo entries",
+#         replace_existing=True,
+#     )
+#     if STARTUP_INDEXES_IN_BACKGROUND:
+#         app.state.startup_background_tasks.append(
+#             asyncio.create_task(
+#                 _run_background_startup_step("ensure_indexes", _ensure_startup_indexes),
+#                 name="startup:ensure_indexes",
+#             )
+#         )
+#     else:
+#         if STARTUP_INDEX_TIMEOUT_SECONDS > 0:
+#             await asyncio.wait_for(
+#                 _ensure_startup_indexes(),
+#                 timeout=STARTUP_INDEX_TIMEOUT_SECONDS,
+#             )
+#         else:
+#             await _ensure_startup_indexes()
+#     configure_payment_manager(force=True)
+#     scheduler.start()
+#     if RUN_STARTUP_MIGRATOR:
+#         if MIGRATOR_IN_BACKGROUND:
+#             app.state.startup_background_tasks.append(
+#                 asyncio.create_task(
+#                     _run_background_startup_step("migrator", _run_migrator),
+#                     name="startup:migrator",
+#                 )
+#             )
+#         else:
+#             await _run_migrator()
+#     if REHYDRATE_IN_BACKGROUND:
+#         app.state.startup_background_tasks.append(
+#             asyncio.create_task(
+#                 _run_background_startup_step("rehydrate_scheduled_rides", _run_rehydrate_jobs),
+#                 name="startup:rehydrate_scheduled_rides",
+#             )
+#         )
+#     else:
+#         await _run_rehydrate_jobs()
+#     startup_logger.info(
+#         "startup_ready",
+#         extra={"duration_ms": round((time.perf_counter() - startup_started) * 1000, 2)},
+#     )
+#     try:
+#         yield
+#     finally:
+#         for task in app.state.startup_background_tasks:
+#             if not task.done():
+#                 task.cancel()
+#         if app.state.startup_background_tasks:
+#             await asyncio.gather(*app.state.startup_background_tasks, return_exceptions=True)
+#         scheduler.shutdown()
 # Create the FastAPI app
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 dictConfig(
@@ -259,7 +261,7 @@ tags_metadata = [
     },
 ]
 app = FastAPI(
-    lifespan=lifespan,
+    # lifespan=lifespan,
     title="Door Delivery API",
     summary="On-demand delivery and ride platform API.",
     description=API_DESCRIPTION,
@@ -333,6 +335,8 @@ async def test_scheduler(message):
     description="Publishes a ride request event to nearby drivers using a fixed payload.",
 )
 async def publish_ride_request_test():
+    from services.sse_service import publish_ride_request
+
     data = {
         "pickup": "ChIJpWm44e0LThARBZjsnnXbdXs",
         "destination": "ChIJ68mtM_IKThARPkerhQBAsqc",
@@ -520,6 +524,8 @@ def root():
     Internal root ping used for smoke checks and scheduler testing.
     Access: Public (no auth), intended for internal diagnostics.
     """
+    from core.scheduler import scheduler
+
     run_time = datetime.now() + timedelta(seconds=20)
     scheduler.add_job(test_scheduler,"date",run_date=run_time,args=[f"test message {run_time}"],misfire_grace_time=31536000)
     data= {"message": "Hello from FasterAPI!"}
@@ -540,6 +546,8 @@ async def health_check_regular():
     Return a compact health snapshot of MongoDB, Redis, APScheduler, and Celery.
     Access: Public (no auth).
     """
+    from celery_worker import celery_app
+
     overall_status = "healthy"
     services = {}
     # --- MongoDB Check ---
@@ -661,6 +669,8 @@ async def test_sse_broadcast(pickup_lat: float, pickup_lon: float):
     Send a synthetic ride request event to validate SSE plumbing.
     Access: Public (no auth), intended for internal testing only.
     """
+    from services.sse_service import publish_ride_request
+
     await publish_ride_request(
         ride_id="1234567897542",
         pickup=f"{pickup_lat},{pickup_lon}",
@@ -682,6 +692,8 @@ async def health_check():
     Return a verbose health report across MongoDB, Redis, APScheduler, and Celery.
     Access: Public (no auth).
     """
+    from celery_worker import celery_app
+
     services = {}
     # This list will track the status of all services
     service_statuses = [] 
@@ -838,20 +850,24 @@ async def health_check():
         data=data  
     )
 # --- auto-routes-start ---
-from api.v1.admin_route import router as v1_admin_route_router
-from api.v1.driver import router as v1_driver_router
-from api.v1.rider_route import router as v1_rider_route_router
-from api.v1.payment import router as v1_payment_router
-from api.v1.sse import router as v1_sse_router
-from api.v1.quarantine import router as v1_quarantine_router
-from api.v1.chat import router as v1_chat_router
-from api.web.payment_template_route import router as web_payment_template_router
-app.include_router(v1_admin_route_router, prefix='/api/v1', include_in_schema=True)
-app.include_router(v1_driver_router, prefix='/api/v1')
-app.include_router(v1_rider_route_router, prefix='/api/v1')
-app.include_router(v1_payment_router, prefix='/api/v1', include_in_schema=True)
-app.include_router(v1_sse_router, prefix='/api/v1')
-app.include_router(v1_quarantine_router, prefix='/api/v1')
-app.include_router(v1_chat_router, prefix='/api/v1')
-app.include_router(web_payment_template_router, prefix='/api', include_in_schema=False)
+if not MINIMAL_BOOT_MODE:
+    from api.v1.admin_route import router as v1_admin_route_router
+    from api.v1.driver import router as v1_driver_router
+    from api.v1.rider_route import router as v1_rider_route_router
+    from api.v1.payment import router as v1_payment_router
+    from api.v1.sse import router as v1_sse_router
+    from api.v1.quarantine import router as v1_quarantine_router
+    from api.v1.chat import router as v1_chat_router
+    from api.web.payment_template_route import router as web_payment_template_router
+
+    app.include_router(v1_admin_route_router, prefix='/api/v1', include_in_schema=True)
+    app.include_router(v1_driver_router, prefix='/api/v1')
+    app.include_router(v1_rider_route_router, prefix='/api/v1')
+    app.include_router(v1_payment_router, prefix='/api/v1', include_in_schema=True)
+    app.include_router(v1_sse_router, prefix='/api/v1')
+    app.include_router(v1_quarantine_router, prefix='/api/v1')
+    app.include_router(v1_chat_router, prefix='/api/v1')
+    app.include_router(web_payment_template_router, prefix='/api', include_in_schema=False)
+else:
+    logging.warning("MINIMAL_BOOT_MODE enabled: skipping API router imports")
 # --- auto-routes-end ---
