@@ -1,4 +1,5 @@
 from core.database import db
+import os
 
 from schemas.tokens_schema import accessTokenCreate,refreshTokenCreate,accessTokenOut,refreshTokenOut
 from pymongo import ReturnDocument
@@ -8,6 +9,45 @@ from bson import ObjectId,errors
 from fastapi import HTTPException
 from repositories.admin_repo import get_admin
 from security.encrypting_jwt import decode_jwt_token_without_expiration
+
+
+def _refresh_token_expiry_days() -> int:
+    raw_value = os.getenv("REFRESH_TOKEN_EXPIRE_DAYS")
+    try:
+        days = int(raw_value) if raw_value is not None else 30
+    except ValueError:
+        days = 30
+    return max(days, 1)
+
+
+def _coerce_datetime(date_value) -> datetime | None:
+    if date_value is None:
+        return None
+    if isinstance(date_value, datetime):
+        if date_value.tzinfo is None:
+            return date_value.replace(tzinfo=timezone.utc)
+        return date_value.astimezone(timezone.utc)
+    if isinstance(date_value, (int, float)):
+        return datetime.fromtimestamp(date_value, tz=timezone.utc)
+    try:
+        parsed = parser.isoparse(str(date_value))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _resolve_refresh_token_expires_at(token: dict) -> datetime | None:
+    explicit_expiration = _coerce_datetime(
+        token.get("expiresAt") or token.get("expires_at")
+    )
+    if explicit_expiration is not None:
+        return explicit_expiration
+    created_at = _coerce_datetime(token.get("dateCreated"))
+    if created_at is None:
+        return None
+    return created_at + timedelta(days=_refresh_token_expiry_days())
 
 async def add_access_tokens(token_data:accessTokenCreate)->accessTokenOut:
     token = token_data.model_dump()
@@ -51,6 +91,10 @@ async def update_admin_access_tokens(token:str)->accessTokenOut:
     
 async def add_refresh_tokens(token_data:refreshTokenCreate)->refreshTokenOut:
     token = token_data.model_dump()
+    if token.get("expiresAt") is None:
+        token["expiresAt"] = datetime.now(timezone.utc) + timedelta(
+            days=_refresh_token_expiry_days()
+        )
     result = await db.refreshToken.insert_one(token)
     tokn = await db.refreshToken.find_one({"_id":result.inserted_id})
     refreshToken = refreshTokenOut(**tokn)
@@ -187,6 +231,16 @@ async def get_refresh_tokens(refreshToken:str)->refreshTokenOut | None:
         return None
     token = await db.refreshToken.find_one({"_id": token_id})
     if token:
+        expires_at = _resolve_refresh_token_expires_at(token)
+        if expires_at is None or datetime.now(timezone.utc) >= expires_at:
+            await db.refreshToken.delete_one({"_id": token_id})
+            return None
+        if token.get("expiresAt") is None:
+            await db.refreshToken.update_one(
+                {"_id": token_id},
+                {"$set": {"expiresAt": expires_at}},
+            )
+            token["expiresAt"] = expires_at
         tokn = refreshTokenOut(**token)
         return tokn
 

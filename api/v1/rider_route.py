@@ -1,6 +1,5 @@
 import os
 import time
-from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request, status, Path,Depends
 from typing import List, Literal, Union, get_args
 from fastapi.responses import RedirectResponse
@@ -50,6 +49,13 @@ from services.rider_service import (
     oauth
 )
 from security.auth import verify_token,verify_token_to_refresh, verify_token_rider_role
+from security.oauth_return import (
+    append_query_params,
+    build_oauth_state,
+    parse_oauth_state_or_raise,
+    resolve_default_frontend_base,
+    resolve_return_url_or_raise,
+)
 from services.notification_targets import register_push_token, has_push_tokens
 from schemas.notification import PushTokenRegister
 from dotenv import load_dotenv 
@@ -57,8 +63,7 @@ load_dotenv()
 
 router = APIRouter(prefix="/riders", tags=["Riders"])
 
-SUCCESS_PAGE_URL = os.getenv("SUCCESS_PAGE_URL", "http://localhost:8080/success")
-ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
+ERROR_PAGE_URL = os.getenv("RIDER_ERROR_PAGE_URL") or os.getenv("ERROR_PAGE_URL")
 
 
 def _extract_place_id(place: object, field_name: str) -> str:
@@ -82,7 +87,13 @@ def _extract_place_id(place: object, field_name: str) -> str:
     summary="Start rider Google OAuth",
     description="Redirects the rider to Google OAuth to begin authentication.",
 )
-async def login_with_google_account(request: Request):
+async def login_with_google_account(
+    request: Request,
+    next: str | None = Query(
+        default=None,
+        description="Optional frontend URL/path to return to after OAuth callback.",
+    ),
+):
     """
     Begin Google OAuth login for riders and redirect to the provider.
 
@@ -90,10 +101,27 @@ async def login_with_google_account(request: Request):
     """
     if not oauth or not oauth.google:
         raise HTTPException(status_code=500, detail="OAuth configuration not initialized")
-    redirect_uri = request.url_for("auth_callback_rider")
-    print("REDIRECT URI:", redirect_uri)
- 
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    backend_host = request.url.hostname or ""
+    requested_next = next or request.headers.get("referer")
+    try:
+        return_url = resolve_return_url_or_raise(
+            role="rider",
+            backend_host=backend_host,
+            next_url=requested_next,
+        )
+    except HTTPException:
+        if next is not None:
+            raise
+        return_url = resolve_default_frontend_base("rider", backend_host=backend_host)
+    state = build_oauth_state(role="rider", return_url=return_url)
+    request.session["oauth_state_rider"] = state
+    request.session["oauth_return_url_rider"] = return_url
+    redirect_uri = str(request.url_for("auth_callback_rider"))
+    return await oauth.google.authorize_redirect(
+        request=request,
+        redirect_uri=redirect_uri,
+        state=state,
+    )
 
 
 # --- Step 2: Handle callback from Google ---
@@ -110,7 +138,51 @@ async def auth_callback_rider(request: Request):
     """
     if not oauth or not oauth.google:
         raise HTTPException(status_code=500, detail="OAuth configuration not initialized")
-    token = await oauth.google.authorize_access_token(request)
+    backend_host = request.url.hostname or ""
+    default_error_url = append_query_params(
+        ERROR_PAGE_URL or resolve_default_frontend_base("rider", backend_host=backend_host),
+        {"status": "failed", "reason": "oauth_callback_failed"},
+    )
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception:
+        return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+
+    incoming_state = request.query_params.get("state")
+    try:
+        state_return_url = parse_oauth_state_or_raise(
+            role="rider",
+            state=incoming_state,
+            backend_host=backend_host,
+        )
+    except HTTPException:
+        return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+    session_state = request.session.pop("oauth_state_rider", None)
+    session_return_url = request.session.pop("oauth_return_url_rider", None)
+    if session_state and incoming_state != session_state:
+        mismatch_url = append_query_params(
+            ERROR_PAGE_URL or resolve_default_frontend_base("rider", backend_host=backend_host),
+            {"status": "failed", "reason": "oauth_state_mismatch"},
+        )
+        return RedirectResponse(url=mismatch_url, status_code=status.HTTP_302_FOUND)
+    if session_return_url:
+        try:
+            validated_session_return = resolve_return_url_or_raise(
+                role="rider",
+                backend_host=backend_host,
+                next_url=session_return_url,
+            )
+        except HTTPException:
+            return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+        if validated_session_return != state_return_url:
+            mismatch_url = append_query_params(
+                ERROR_PAGE_URL
+                or resolve_default_frontend_base("rider", backend_host=backend_host),
+                {"status": "failed", "reason": "oauth_return_url_mismatch"},
+            )
+            return RedirectResponse(url=mismatch_url, status_code=status.HTTP_302_FOUND)
+    final_return_url = session_return_url or state_return_url
+
     user_info = token.get('userinfo')
 
     # Just print or return user info for now
@@ -134,21 +206,25 @@ async def auth_callback_rider(request: Request):
             access_token = data.access_token
             refresh_token = data.refresh_token
 
-        query = urlencode(
+        success_url = append_query_params(
+            final_return_url,
             {
                 "status": "success",
                 "access_token": access_token,
                 "refresh_token": refresh_token,
-            }
+            },
         )
-        success_url = f"{SUCCESS_PAGE_URL}?{query}"
         response = RedirectResponse(
             url=success_url,
             status_code=status.HTTP_302_FOUND
         )
         return response
 
-    raise HTTPException(status_code=400, detail={"status": "failed", "message": "No user info found"})
+    error_url = append_query_params(
+        ERROR_PAGE_URL or resolve_default_frontend_base("rider", backend_host=backend_host),
+        {"status": "failed", "reason": "oauth_user_info_missing"},
+    )
+    return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
 
 
 @router.post(

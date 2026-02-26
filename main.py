@@ -43,6 +43,14 @@ def _float_setting(name: str, default: float) -> float:
         return float(raw_value)
     except ValueError:
         return default
+def _int_setting(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
 RUN_STARTUP_MIGRATOR = _flag("RUN_STARTUP_MIGRATOR", True)
 MIGRATOR_IN_BACKGROUND = _flag("MIGRATOR_IN_BACKGROUND", True)
 REHYDRATE_IN_BACKGROUND = _flag("REHYDRATE_IN_BACKGROUND", True)
@@ -50,6 +58,14 @@ REHYDRATE_TIMEOUT_SECONDS = _float_setting("REHYDRATE_TIMEOUT_SECONDS", 20.0)
 STARTUP_INDEXES_IN_BACKGROUND = _flag("STARTUP_INDEXES_IN_BACKGROUND", True)
 STARTUP_INDEX_TIMEOUT_SECONDS = _float_setting("STARTUP_INDEX_TIMEOUT_SECONDS", 20.0)
 MINIMAL_BOOT_MODE = _flag("MINIMAL_BOOT_MODE", False)
+SESSION_SECRET_KEY = (
+    os.getenv("SESSION_SECRET_KEY")
+    or os.getenv("SECRET_KEY")
+    or "not-some-random-string"
+)
+SESSION_MAX_AGE_SECONDS = max(_int_setting("SESSION_MAX_AGE_SECONDS", 600), 1)
+SESSION_HTTPS_ONLY = _flag("SESSION_HTTPS_ONLY", False)
+SESSION_SAME_SITE = os.getenv("SESSION_SAME_SITE", "lax")
 startup_logger = logging.getLogger("app.startup")
 async def _run_migrator() -> None:
     from redis_om import Migrator
@@ -101,6 +117,11 @@ async def _ensure_startup_indexes() -> None:
             partialFilterExpression={
                 "expires_at": {"$exists": True}
             },
+        ),
+        db.refreshToken.create_index(
+            [("expiresAt", ASCENDING)],
+            expireAfterSeconds=0,
+            name="refresh_token_expires_idx",
         ),
     )
     startup_logger.info(
@@ -274,7 +295,13 @@ app = FastAPI(
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(StructuredLoggingMiddleware)
-app.add_middleware(SessionMiddleware, secret_key="not-some-random-string")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    max_age=SESSION_MAX_AGE_SECONDS,
+    same_site=SESSION_SAME_SITE,
+    https_only=SESSION_HTTPS_ONLY,
+)
 redis_url = (
     os.getenv("CELERY_BROKER_URL")
     or os.getenv("REDIS_URL")
@@ -859,6 +886,7 @@ if not MINIMAL_BOOT_MODE:
     from api.v1.quarantine import router as v1_quarantine_router
     from api.v1.chat import router as v1_chat_router
     from api.web.payment_template_route import router as web_payment_template_router
+    from api.web.fake_onboarding_template_route import router as web_fake_onboarding_router
 
     app.include_router(v1_admin_route_router, prefix='/api/v1', include_in_schema=True)
     app.include_router(v1_driver_router, prefix='/api/v1')
@@ -868,6 +896,7 @@ if not MINIMAL_BOOT_MODE:
     app.include_router(v1_quarantine_router, prefix='/api/v1')
     app.include_router(v1_chat_router, prefix='/api/v1')
     app.include_router(web_payment_template_router, prefix='/api', include_in_schema=False)
+    app.include_router(web_fake_onboarding_router, prefix='/api', include_in_schema=False)
 else:
     logging.warning("MINIMAL_BOOT_MODE enabled: skipping API router imports")
 # --- auto-routes-end ---

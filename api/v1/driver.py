@@ -1,6 +1,5 @@
 
 import os
-from urllib.parse import urlencode
 from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path, Depends, UploadFile, File, Form
 from typing import List, Optional
 from fastapi.responses import RedirectResponse
@@ -8,7 +7,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
-from core.staff_payment import get_staff_payment_service
+from core.staff_payment import StaffPaymentService, get_staff_payment_service
+from schemas.driver_onboarding import (
+    FakeOnboardingCompleteOut,
+    FakeOnboardingDraftIn,
+    FakeOnboardingStatusOut,
+)
 from schemas.tokens_schema import accessTokenOut
 from schemas.storage_upload import CloudflareUploadResponse
 from schemas.payout import (
@@ -77,13 +81,26 @@ from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_
 from services.sse_service import publish_ride_request
 from services.notification_targets import register_push_token, has_push_tokens
 from schemas.notification import PushTokenRegister
+from security.oauth_return import (
+    append_query_params,
+    build_oauth_state,
+    parse_oauth_state_or_raise,
+    resolve_default_frontend_base,
+    resolve_return_url_or_raise,
+)
 
 
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
-SUCCESS_PAGE_URL = os.getenv("SUCCESS_PAGE_URL", "http://localhost:8080/success")
-ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
+ERROR_PAGE_URL = os.getenv("DRIVER_ERROR_PAGE_URL") or os.getenv("ERROR_PAGE_URL")
 MAX_CLOUDFLARE_UPLOAD_BYTES = 10 * 1024 * 1024
 optional_bearer_auth = HTTPBearer(auto_error=False)
+
+
+def _extract_bearer_token(request: Request) -> Optional[str]:
+    authorization = request.headers.get("authorization") or ""
+    if not authorization.lower().startswith("bearer "):
+        return None
+    return authorization.split(" ", 1)[1].strip() or None
 
 
 async def _get_optional_driver_token(
@@ -110,16 +127,42 @@ async def _get_optional_driver_token(
     summary="Start driver Google OAuth",
     description="Redirects the driver to Google OAuth to begin authentication.",
 )
-async def login(request: Request):
+async def login(
+    request: Request,
+    next: str | None = Query(
+        default=None,
+        description="Optional frontend URL/path to return to after OAuth callback.",
+    ),
+):
     """
     Begin Google OAuth login for drivers and redirect to the provider.
 
     Access: Public (no auth).
     """
-    base_url = request.url_for("root")
-    redirect_uri = f"{base_url}auth/callback"
-     
-    return await oauth.google_driver.authorize_redirect(request, redirect_uri)
+    if not oauth or not oauth.google_driver:
+        raise HTTPException(status_code=500, detail="OAuth configuration not initialized")
+    backend_host = request.url.hostname or ""
+    requested_next = next or request.headers.get("referer")
+    try:
+        return_url = resolve_return_url_or_raise(
+            role="driver",
+            backend_host=backend_host,
+            next_url=requested_next,
+        )
+    except HTTPException:
+        if next is not None:
+            raise
+        return_url = resolve_default_frontend_base("driver", backend_host=backend_host)
+    state = build_oauth_state(role="driver", return_url=return_url)
+    request.session["oauth_state_driver"] = state
+    request.session["oauth_return_url_driver"] = return_url
+    redirect_uri = str(request.url_for("auth_callback"))
+
+    return await oauth.google_driver.authorize_redirect(
+        request=request,
+        redirect_uri=redirect_uri,
+        state=state,
+    )
 
 
 # --- Step 2: Handle callback from Google ---
@@ -136,11 +179,52 @@ async def auth_callback(request: Request):
 
     Access: Public (no auth).
     """
+    backend_host = request.url.hostname or ""
+    default_error_url = append_query_params(
+        ERROR_PAGE_URL or resolve_default_frontend_base("driver", backend_host=backend_host),
+        {"status": "failed", "reason": "oauth_callback_failed"},
+    )
     try:
         token = await oauth.google_driver.authorize_access_token(request)
         user_info = token.get('userinfo')
-    except:
-        raise HTTPException(status_code=400,detail="Login session expired or was invalid. Please try logging in again.")
+    except Exception:
+        return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+
+    incoming_state = request.query_params.get("state")
+    try:
+        state_return_url = parse_oauth_state_or_raise(
+            role="driver",
+            state=incoming_state,
+            backend_host=backend_host,
+        )
+    except HTTPException:
+        return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+    session_state = request.session.pop("oauth_state_driver", None)
+    session_return_url = request.session.pop("oauth_return_url_driver", None)
+    if session_state and incoming_state != session_state:
+        mismatch_url = append_query_params(
+            ERROR_PAGE_URL or resolve_default_frontend_base("driver", backend_host=backend_host),
+            {"status": "failed", "reason": "oauth_state_mismatch"},
+        )
+        return RedirectResponse(url=mismatch_url, status_code=status.HTTP_302_FOUND)
+    if session_return_url:
+        try:
+            validated_session_return = resolve_return_url_or_raise(
+                role="driver",
+                backend_host=backend_host,
+                next_url=session_return_url,
+            )
+        except HTTPException:
+            return RedirectResponse(url=default_error_url, status_code=status.HTTP_302_FOUND)
+        if validated_session_return != state_return_url:
+            mismatch_url = append_query_params(
+                ERROR_PAGE_URL
+                or resolve_default_frontend_base("driver", backend_host=backend_host),
+                {"status": "failed", "reason": "oauth_return_url_mismatch"},
+            )
+            return RedirectResponse(url=mismatch_url, status_code=status.HTTP_302_FOUND)
+    final_return_url = session_return_url or state_return_url
+
     # Just print or return user info for now
     if user_info:
         new_data= DriverCreate(email=user_info["email"],password="",)
@@ -155,17 +239,22 @@ async def auth_callback(request: Request):
         # user_info.get("picture",None)
         access_token = driver.access_token
         refresh_token = driver.refresh_token
-        query = urlencode(
+        success_url = append_query_params(
+            final_return_url,
             {
                 "status": "success",
                 "access_token": access_token,
                 "refresh_token": refresh_token,
-            }
+            },
         )
-        success_url = f"{SUCCESS_PAGE_URL}?{query}"
         return RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
     else:
-        raise HTTPException(status_code=400,detail={"status": "failed", "message": "No user info found"})
+        error_url = append_query_params(
+            ERROR_PAGE_URL
+            or resolve_default_frontend_base("driver", backend_host=backend_host),
+            {"status": "failed", "reason": "oauth_user_info_missing"},
+        )
+        return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
 
 
 
@@ -905,24 +994,28 @@ async def finish_password_reset_process_for_driver_that_forgot_password(driver_d
 # ------- PAYOUT MANAGEMENT ------- 
 # ---------------------------------
 
-staff_payment_service = get_staff_payment_service()
-
-
-
 # ------------------------------
-# Driver Stripe Connect Onboarding
+# Driver Payout Onboarding
 # ------------------------------
 @router.post(
     "/payout/onboard",
     response_model=APIResponse[dict],
     summary="Start payout onboarding",
-    description="Creates a Stripe Connect account and returns an onboarding link.",
+    description="Creates a payout account with the configured provider and returns an onboarding link.",
 )
-async def onboard_driver_for_payments(token: accessTokenOut = Depends(verify_token_driver_role)):
+async def onboard_driver_for_payments(
+    request: Request,
+    return_url: Optional[str] = Query(
+        default=None,
+        description="Optional frontend return URL for fake onboarding completion redirect.",
+    ),
+    token: accessTokenOut = Depends(verify_token_driver_role),
+    staff_payment_service: StaffPaymentService = Depends(get_staff_payment_service),
+):
     """
-    Onboard driver for Stripe Connect payments.
+    Onboard driver for payout processing.
 
-    Creates a Stripe Connect Express account and generates onboarding link.
+    Creates a provider payout account and generates onboarding link.
     Driver must complete onboarding before receiving payments.
 
     Access: Driver only (valid driver access token required).
@@ -933,7 +1026,12 @@ async def onboard_driver_for_payments(token: accessTokenOut = Depends(verify_tok
         raise HTTPException(status_code=404, detail="Driver not found")
 
     try:
-        onboarding_result = await staff_payment_service.onboard_driver(driver)
+        onboarding_result = await staff_payment_service.onboard_driver(
+            driver,
+            driver_access_token=_extract_bearer_token(request),
+            requested_return_url=return_url,
+            backend_host=request.url.hostname,
+        )
         return APIResponse(
             status_code=200,
             data=onboarding_result,
@@ -949,13 +1047,16 @@ async def onboard_driver_for_payments(token: accessTokenOut = Depends(verify_tok
     "/payout/status",
     response_model=APIResponse[dict],
     summary="Get payout status",
-    description="Returns Stripe Connect account status and payout eligibility.",
+    description="Returns provider payout account status and eligibility.",
 )
-async def get_driver_payment_status(token: accessTokenOut = Depends(verify_token_driver_role)):
+async def get_driver_payment_status(
+    token: accessTokenOut = Depends(verify_token_driver_role),
+    staff_payment_service: StaffPaymentService = Depends(get_staff_payment_service),
+):
     """
     Get driver's current payment status and eligibility.
 
-    Returns information about Stripe Connect account status and payout eligibility.
+    Returns information about payout account status and payout eligibility.
 
     Access: Driver only (valid driver access token required).
     """
@@ -973,6 +1074,103 @@ async def get_driver_payment_status(token: accessTokenOut = Depends(verify_token
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Status check failed: {str(e)}")
+
+
+@router.get(
+    "/payout/onboarding/fake",
+    response_model=APIResponse[FakeOnboardingStatusOut],
+    summary="Get fake payout onboarding state",
+    description="Returns current fake onboarding draft/completion state for the authenticated driver.",
+)
+async def get_fake_payout_onboarding_state(
+    request: Request,
+    return_url: Optional[str] = Query(
+        default=None,
+        description="Optional return URL to persist for completion redirect.",
+    ),
+    token: accessTokenOut = Depends(verify_token_driver_role),
+    staff_payment_service: StaffPaymentService = Depends(get_staff_payment_service),
+):
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    state = await staff_payment_service.get_fake_onboarding_state(
+        driver=driver,
+        requested_return_url=return_url,
+        backend_host=request.url.hostname,
+    )
+    return APIResponse(
+        status_code=200,
+        data=FakeOnboardingStatusOut(**state),
+        detail="Fake onboarding state retrieved successfully",
+    )
+
+
+@router.put(
+    "/payout/onboarding/fake",
+    response_model=APIResponse[FakeOnboardingStatusOut],
+    summary="Save fake payout onboarding draft",
+    description="Persists fake onboarding draft fields for the authenticated driver.",
+)
+async def save_fake_payout_onboarding_draft(
+    request: Request,
+    payload: FakeOnboardingDraftIn,
+    return_url: Optional[str] = Query(
+        default=None,
+        description="Optional return URL to persist for completion redirect.",
+    ),
+    token: accessTokenOut = Depends(verify_token_driver_role),
+    staff_payment_service: StaffPaymentService = Depends(get_staff_payment_service),
+):
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    state = await staff_payment_service.save_fake_onboarding(
+        driver=driver,
+        payload=payload,
+        requested_return_url=return_url,
+        backend_host=request.url.hostname,
+    )
+    return APIResponse(
+        status_code=200,
+        data=FakeOnboardingStatusOut(**state),
+        detail="Fake onboarding draft saved",
+    )
+
+
+@router.post(
+    "/payout/onboarding/fake/complete",
+    response_model=APIResponse[FakeOnboardingCompleteOut],
+    summary="Complete fake payout onboarding",
+    description="Validates and finalizes fake onboarding, then returns a redirect URL for the caller.",
+)
+async def complete_fake_payout_onboarding(
+    request: Request,
+    payload: FakeOnboardingDraftIn,
+    return_url: Optional[str] = Query(
+        default=None,
+        description="Optional return URL override for completion redirect.",
+    ),
+    token: accessTokenOut = Depends(verify_token_driver_role),
+    staff_payment_service: StaffPaymentService = Depends(get_staff_payment_service),
+):
+    driver = await retrieve_driver_by_driver_id(id=token.userId)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    completion = await staff_payment_service.complete_fake_onboarding(
+        driver=driver,
+        payload=payload,
+        requested_return_url=return_url,
+        backend_host=request.url.hostname,
+    )
+    return APIResponse(
+        status_code=200,
+        data=FakeOnboardingCompleteOut(**completion),
+        detail="Fake onboarding completed successfully",
+    )
 
 # ------------------------------
 # List Payouts (with pagination)
@@ -1103,22 +1301,23 @@ async def get_driver_available_balance(token: accessTokenOut = Depends(verify_to
         currency="GBP"
     ), detail="Balance calculated successfully")
 # ------------------------------
-# Request Payout (Transfer to Stripe Balance)
+# Request Payout (Transfer to provider balance)
 # ------------------------------
 @router.post(
     "/payout/request",
     response_model=APIResponse[PayoutOut],
     summary="Request a payout",
-    description="Transfers funds to the driver's Stripe balance and records the payout.",
+    description="Transfers funds to the driver's configured payout account and records the payout.",
 )
 async def request_payout_transfer(
     payout_request: PayoutRequestIn,
-    token: accessTokenOut = Depends(verify_token_driver_role)
+    token: accessTokenOut = Depends(verify_token_driver_role),
+    staff_payment_service: StaffPaymentService = Depends(get_staff_payment_service),
 ):
     """
-    Request a payout transfer to driver's Stripe account.
+    Request a payout transfer to driver's configured payout account.
 
-    This will transfer money from platform to driver's Stripe balance.
+    This will transfer money from platform to driver's provider account.
     For instant payouts, money goes directly to bank (higher fees).
 
     Access: Driver only (valid driver access token required).
@@ -1128,11 +1327,11 @@ async def request_payout_transfer(
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
-    # Check if driver has Stripe Connect account
+    # Check if driver has payout account
     if not driver.stripeAccountId:
         raise HTTPException(
             status_code=400,
-            detail="Driver must complete Stripe Connect onboarding first. Use /drivers/payout/onboard"
+            detail="Driver must complete payout onboarding first. Use /drivers/payout/onboard",
         )
 
     # Get available balance

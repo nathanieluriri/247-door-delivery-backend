@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Driver Payout Onboarding</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --text: #13233a;
+      --muted: #58708c;
+      --brand: #0a7a43;
+      --brand-soft: #e6f6ee;
+      --border: #d7dde5;
+      --danger: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top right, #d6f0e2 0, var(--bg) 40%);
+      color: var(--text);
+    }
+    .container {
+      max-width: 980px;
+      margin: 32px auto;
+      padding: 0 16px 48px;
+    }
+    .hero {
+      background: linear-gradient(130deg, #0e8c50, #2da86f);
+      color: #fff;
+      border-radius: 14px;
+      padding: 20px 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 16px 30px rgba(20, 89, 55, 0.25);
+    }
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 1.5rem;
+    }
+    .hero p {
+      margin: 0;
+      opacity: 0.95;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 1.1rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 11px;
+      font-size: 0.95rem;
+    }
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+    }
+    .check-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-save {
+      background: var(--brand-soft);
+      color: var(--brand);
+    }
+    .btn-complete {
+      background: var(--brand);
+      color: #fff;
+    }
+    .status {
+      margin-top: 14px;
+      padding: 10px 11px;
+      border-radius: 8px;
+      background: #eef2f6;
+      color: var(--text);
+      font-size: 0.92rem;
+    }
+    .status.error {
+      background: #fff0f0;
+      color: var(--danger);
+    }
+    .status.ok {
+      background: #eaf8f0;
+      color: #146c43;
+    }
+    .missing {
+      color: var(--danger);
+      font-weight: 600;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <h1>Driver Payout Onboarding (Fake Provider)</h1>
+      <p>Complete this form to simulate payout onboarding. Drafts autosave and completion redirects back.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Personal Information</h2>
+      <div class="grid">
+        <div><label for="first_name">First Name</label><input id="first_name" /></div>
+        <div><label for="last_name">Last Name</label><input id="last_name" /></div>
+        <div><label for="email">Email</label><input id="email" type="email" /></div>
+        <div><label for="phone">Phone</label><input id="phone" /></div>
+        <div><label for="dob_day">DOB Day</label><input id="dob_day" type="number" min="1" max="31" /></div>
+        <div><label for="dob_month">DOB Month</label><input id="dob_month" type="number" min="1" max="12" /></div>
+        <div><label for="dob_year">DOB Year</label><input id="dob_year" type="number" min="1900" max="2100" /></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Address</h2>
+      <div class="grid">
+        <div><label for="line1">Line 1</label><input id="line1" /></div>
+        <div><label for="line2">Line 2</label><input id="line2" /></div>
+        <div><label for="city">City</label><input id="city" /></div>
+        <div><label for="state">State</label><input id="state" /></div>
+        <div><label for="postal_code">Postal Code</label><input id="postal_code" /></div>
+        <div><label for="country">Country</label><input id="country" value="GB" /></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Business Profile</h2>
+      <div class="grid">
+        <div>
+          <label for="business_type">Business Type</label>
+          <select id="business_type">
+            <option value="">Select</option>
+            <option value="individual">Individual</option>
+            <option value="company">Company</option>
+          </select>
+        </div>
+        <div><label for="product_description">Product Description</label><input id="product_description" /></div>
+        <div><label for="website">Website</label><input id="website" /></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Bank Details</h2>
+      <div class="grid">
+        <div><label for="account_holder_name">Account Holder Name</label><input id="account_holder_name" /></div>
+        <div><label for="account_number">Account Number</label><input id="account_number" /></div>
+        <div><label for="sort_code">Sort Code</label><input id="sort_code" /></div>
+        <div><label for="bank_name">Bank Name</label><input id="bank_name" /></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Attestations</h2>
+      <div class="check-row"><input id="tos_accepted" type="checkbox" /><label for="tos_accepted">I accept the terms of service</label></div>
+      <div class="check-row"><input id="identity_confirmed" type="checkbox" /><label for="identity_confirmed">I confirm identity details are valid</label></div>
+      <div class="check-row"><input id="information_accurate" type="checkbox" /><label for="information_accurate">I confirm all information is accurate</label></div>
+      <div class="actions">
+        <button class="btn-save" id="save_button" type="button">Save Draft</button>
+        <button class="btn-complete" id="complete_button" type="button">Complete Onboarding</button>
+      </div>
+      <div class="status" id="status_box">Loading onboarding state...</div>
+      <div class="missing" id="missing_box"></div>
+    </div>
+  </div>
+
+  <script>
+    const token = {{ token | tojson }};
+    const loadUrl = {{ load_url | tojson }};
+    const saveUrl = {{ save_url | tojson }};
+    const completeUrl = {{ complete_url | tojson }};
+    const returnUrl = {{ return_url | tojson }};
+
+    const statusBox = document.getElementById("status_box");
+    const missingBox = document.getElementById("missing_box");
+
+    function setStatus(message, level) {
+      statusBox.textContent = message;
+      statusBox.className = "status";
+      if (level === "error") statusBox.classList.add("error");
+      if (level === "ok") statusBox.classList.add("ok");
+    }
+
+    function apiUrl(basePath) {
+      if (!returnUrl) return basePath;
+      const encoded = encodeURIComponent(returnUrl);
+      return `${basePath}?return_url=${encoded}`;
+    }
+
+    function readInput(id) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      const value = el.value;
+      if (value === undefined || value === null) return null;
+      return value.trim();
+    }
+
+    function readIntInput(id) {
+      const raw = readInput(id);
+      if (!raw) return null;
+      const num = Number.parseInt(raw, 10);
+      return Number.isNaN(num) ? null : num;
+    }
+
+    function writeInput(id, value) {
+      if (value === undefined || value === null) return;
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.value = value;
+    }
+
+    function writeCheckbox(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.checked = value === true;
+    }
+
+    function buildPayload() {
+      return {
+        personal: {
+          first_name: readInput("first_name"),
+          last_name: readInput("last_name"),
+          email: readInput("email"),
+          phone: readInput("phone"),
+          dob_day: readIntInput("dob_day"),
+          dob_month: readIntInput("dob_month"),
+          dob_year: readIntInput("dob_year")
+        },
+        address: {
+          line1: readInput("line1"),
+          line2: readInput("line2"),
+          city: readInput("city"),
+          state: readInput("state"),
+          postal_code: readInput("postal_code"),
+          country: readInput("country")
+        },
+        business_profile: {
+          business_type: readInput("business_type"),
+          product_description: readInput("product_description"),
+          website: readInput("website")
+        },
+        bank: {
+          account_holder_name: readInput("account_holder_name"),
+          account_number: readInput("account_number"),
+          sort_code: readInput("sort_code"),
+          bank_name: readInput("bank_name")
+        },
+        attestations: {
+          tos_accepted: document.getElementById("tos_accepted").checked,
+          identity_confirmed: document.getElementById("identity_confirmed").checked,
+          information_accurate: document.getElementById("information_accurate").checked
+        },
+        return_url: returnUrl
+      };
+    }
+
+    function hydrateDraft(draft) {
+      if (!draft) return;
+      const personal = draft.personal || {};
+      const address = draft.address || {};
+      const business = draft.business_profile || {};
+      const bank = draft.bank || {};
+      const attest = draft.attestations || {};
+
+      writeInput("first_name", personal.first_name);
+      writeInput("last_name", personal.last_name);
+      writeInput("email", personal.email);
+      writeInput("phone", personal.phone);
+      writeInput("dob_day", personal.dob_day);
+      writeInput("dob_month", personal.dob_month);
+      writeInput("dob_year", personal.dob_year);
+
+      writeInput("line1", address.line1);
+      writeInput("line2", address.line2);
+      writeInput("city", address.city);
+      writeInput("state", address.state);
+      writeInput("postal_code", address.postal_code);
+      writeInput("country", address.country);
+
+      writeInput("business_type", business.business_type);
+      writeInput("product_description", business.product_description);
+      writeInput("website", business.website);
+
+      writeInput("account_holder_name", bank.account_holder_name);
+      writeInput("account_number", bank.account_number);
+      writeInput("sort_code", bank.sort_code);
+      writeInput("bank_name", bank.bank_name);
+
+      writeCheckbox("tos_accepted", attest.tos_accepted);
+      writeCheckbox("identity_confirmed", attest.identity_confirmed);
+      writeCheckbox("information_accurate", attest.information_accurate);
+    }
+
+    async function loadState() {
+      setStatus("Loading onboarding state...", "");
+      try {
+        const response = await fetch(apiUrl(loadUrl), {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.detail || "Failed to load onboarding state");
+        }
+        const data = payload.data || {};
+        hydrateDraft(data.draft || {});
+        if (Array.isArray(data.required_missing) && data.required_missing.length > 0) {
+          missingBox.textContent = `Required fields missing: ${data.required_missing.join(", ")}`;
+        } else {
+          missingBox.textContent = "";
+        }
+        setStatus(`Status: ${data.status || "in_progress"}`, "ok");
+      } catch (err) {
+        setStatus(String(err), "error");
+      }
+    }
+
+    async function saveDraft() {
+      setStatus("Saving draft...", "");
+      try {
+        const response = await fetch(apiUrl(saveUrl), {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(buildPayload())
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.detail || "Failed to save draft");
+        }
+        const data = payload.data || {};
+        if (Array.isArray(data.required_missing) && data.required_missing.length > 0) {
+          missingBox.textContent = `Required fields missing: ${data.required_missing.join(", ")}`;
+        } else {
+          missingBox.textContent = "";
+        }
+        setStatus("Draft saved", "ok");
+      } catch (err) {
+        setStatus(String(err), "error");
+      }
+    }
+
+    async function completeOnboarding() {
+      setStatus("Completing onboarding...", "");
+      try {
+        const response = await fetch(apiUrl(completeUrl), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(buildPayload())
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          const detail = payload.detail && typeof payload.detail === "object"
+            ? JSON.stringify(payload.detail)
+            : payload.detail;
+          throw new Error(detail || "Failed to complete onboarding");
+        }
+        const data = payload.data || {};
+        setStatus("Onboarding completed. Redirecting...", "ok");
+        if (data.redirect_url) {
+          window.location.href = data.redirect_url;
+          return;
+        }
+      } catch (err) {
+        setStatus(String(err), "error");
+      }
+    }
+
+    document.getElementById("save_button").addEventListener("click", saveDraft);
+    document.getElementById("complete_button").addEventListener("click", completeOnboarding);
+
+    loadState();
+  </script>
+</body>
+</html>

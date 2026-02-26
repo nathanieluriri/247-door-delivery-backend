@@ -12,7 +12,7 @@ class Location(BaseModel):
 
 load_dotenv()
 
-GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY",'')
 logger = logging.getLogger(__name__)
 # --- 1. Define Pydantic Models ---
 
@@ -85,7 +85,7 @@ class MapsService:
         self, 
         origin: tuple, 
         destination: tuple, 
-        stops: list = None, 
+        stops: Optional[list] = None, 
         optimize: bool = False
     ) -> Optional[DeliveryRouteResponse]:
         

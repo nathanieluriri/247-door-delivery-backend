@@ -10,8 +10,18 @@ from bson import ObjectId
 
 load_dotenv()
 SECRETID = os.getenv("SECRETID")
+def _int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
 # Token lifetime (in minutes)
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = max(_int_env("ACCESS_TOKEN_EXPIRE_MINUTES", 15), 1)
 # Secret key for signing (use env var in production)
 
 
@@ -28,6 +38,10 @@ class JWTPayload(BaseModel):
 
 SECRET_KEY = os.getenv("SECRET_KEY", "super-secure-secret-key")
 ALGORITHM = "HS256"
+
+
+def _access_expiration_delta() -> timedelta:
+    return timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
 async def get_secret_dict()->dict:
     if not SECRETID:
@@ -90,7 +104,7 @@ def create_jwt_token(
         user_id=user_id,
         user_type=user_type,
         is_activated=is_activated,
-        exp=datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        exp=datetime.now(timezone.utc) + _access_expiration_delta(),
         iat=datetime.now(timezone.utc),
     ).model_dump()
 
@@ -121,7 +135,7 @@ async def create_jwt_member_token(token):
     payload = {
         "accessToken": token,
         "role": "member",
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        "exp": datetime.now(timezone.utc) + _access_expiration_delta(),
     }
 
     return jwt.encode(
@@ -136,7 +150,7 @@ async def create_jwt_admin_token(token: str,userId:str):
         "accessToken": token,
         "role": "admin",
         "userId":userId,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=15)
+        "exp": datetime.now(timezone.utc) + _access_expiration_delta()
     }
 
     encoded_jwt = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
