@@ -16,5 +16,5 @@ COPY . .
 # Expose port
 EXPOSE 7860
 
-# Default command for web (can be overridden by Render)
-CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:7860", "--timeout", "120", "--graceful-timeout", "30", "main:app"]
+# Default command for web (can be overridden by deploy/runtime platform)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
