@@ -60,7 +60,7 @@ class MapsService:
             destination = (stop_location.latitude, stop_location.longitude)
 
             # Request distance matrix
-            matrix = self.client.distance_matrix(
+            matrix = self.client.distance_matrix( # type: ignore
                 origins=[origin],
                 destinations=[destination],
                 mode="driving",
@@ -92,7 +92,7 @@ class MapsService:
         try:
             self._ensure_client()
             # Request directions from Google
-            directions_result = self.client.directions(
+            directions_result = self.client.directions( # type: ignore
                 origin=origin,
                 destination=destination,
                 waypoints=stops, 

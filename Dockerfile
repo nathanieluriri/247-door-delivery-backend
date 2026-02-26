@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 7860
 
 # Default command for web (can be overridden by deploy/runtime platform)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["fastapi", "run", "main.py", "--host", "0.0.0.0", "--port", "7860"]

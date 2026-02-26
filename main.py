@@ -2,6 +2,8 @@ import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from core.payments.manager import configure_payment_manager
+from core.scheduler import scheduler
 from middlewares.request_timing_middleware import RequestTimingMiddleware
 from limits.strategies import FixedWindowRateLimiter
 from datetime import datetime,timedelta
@@ -21,6 +23,7 @@ import redis
 from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
 from middlewares.rate_limiting_middleware import RateLimitingMiddleware
+from services.sse_service import cleanup_stale_driver_locations
 MONGO_URI = os.getenv("MONGO_URL")
 REDIS_URI = f"redis://{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/0"
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
@@ -124,74 +127,74 @@ def apscheduler_heartbeat():
         redis_client.set("apscheduler:heartbeat", str(timestamp), ex=60)  # expires in 60s
         
         
-# @asynccontextmanager
-# async def lifespan(app:FastAPI):
-#     startup_started = time.perf_counter()
-#     app.state.startup_background_tasks = []
-#     # --- Add Heartbeat Job ---
-#     scheduler.add_job(
-#         apscheduler_heartbeat,
-#         trigger=IntervalTrigger(seconds=105),
-#         id="apscheduler_heartbeat",
-#         name="APScheduler Heartbeat",
-#         replace_existing=True
-#     )
-#     scheduler.add_job(
-#         cleanup_stale_driver_locations,
-#         trigger=IntervalTrigger(seconds=180),
-#         id="driver_presence_cleanup",
-#         name="Remove stale driver geo entries",
-#         replace_existing=True,
-#     )
-#     if STARTUP_INDEXES_IN_BACKGROUND:
-#         app.state.startup_background_tasks.append(
-#             asyncio.create_task(
-#                 _run_background_startup_step("ensure_indexes", _ensure_startup_indexes),
-#                 name="startup:ensure_indexes",
-#             )
-#         )
-#     else:
-#         if STARTUP_INDEX_TIMEOUT_SECONDS > 0:
-#             await asyncio.wait_for(
-#                 _ensure_startup_indexes(),
-#                 timeout=STARTUP_INDEX_TIMEOUT_SECONDS,
-#             )
-#         else:
-#             await _ensure_startup_indexes()
-#     configure_payment_manager(force=True)
-#     scheduler.start()
-#     if RUN_STARTUP_MIGRATOR:
-#         if MIGRATOR_IN_BACKGROUND:
-#             app.state.startup_background_tasks.append(
-#                 asyncio.create_task(
-#                     _run_background_startup_step("migrator", _run_migrator),
-#                     name="startup:migrator",
-#                 )
-#             )
-#         else:
-#             await _run_migrator()
-#     if REHYDRATE_IN_BACKGROUND:
-#         app.state.startup_background_tasks.append(
-#             asyncio.create_task(
-#                 _run_background_startup_step("rehydrate_scheduled_rides", _run_rehydrate_jobs),
-#                 name="startup:rehydrate_scheduled_rides",
-#             )
-#         )
-#     else:
-#         await _run_rehydrate_jobs()
-#     startup_logger.info(
-#         "startup_ready",
-#         extra={"duration_ms": round((time.perf_counter() - startup_started) * 1000, 2)},
-#     )
-#     try:
-#         yield
-#     finally:
-#         for task in app.state.startup_background_tasks:
-#             if not task.done():
-#                 task.cancel()
-#         if app.state.startup_background_tasks:
-#             await asyncio.gather(*app.state.startup_background_tasks, return_exceptions=True)
-#         scheduler.shutdown()
+@asynccontextmanager
+async def lifespan(app:FastAPI):
+    startup_started = time.perf_counter()
+    app.state.startup_background_tasks = []
+    # --- Add Heartbeat Job ---
+    scheduler.add_job(
+        apscheduler_heartbeat,
+        trigger=IntervalTrigger(seconds=105),
+        id="apscheduler_heartbeat",
+        name="APScheduler Heartbeat",
+        replace_existing=True
+    )
+    scheduler.add_job(
+        cleanup_stale_driver_locations,
+        trigger=IntervalTrigger(seconds=180),
+        id="driver_presence_cleanup",
+        name="Remove stale driver geo entries",
+        replace_existing=True,
+    )
+    if STARTUP_INDEXES_IN_BACKGROUND:
+        app.state.startup_background_tasks.append(
+            asyncio.create_task(
+                _run_background_startup_step("ensure_indexes", _ensure_startup_indexes),
+                name="startup:ensure_indexes",
+            )
+        )
+    else:
+        if STARTUP_INDEX_TIMEOUT_SECONDS > 0:
+            await asyncio.wait_for(
+                _ensure_startup_indexes(),
+                timeout=STARTUP_INDEX_TIMEOUT_SECONDS,
+            )
+        else:
+            await _ensure_startup_indexes()
+    configure_payment_manager(force=True)
+    scheduler.start()
+    if RUN_STARTUP_MIGRATOR:
+        if MIGRATOR_IN_BACKGROUND:
+            app.state.startup_background_tasks.append(
+                asyncio.create_task(
+                    _run_background_startup_step("migrator", _run_migrator),
+                    name="startup:migrator",
+                )
+            )
+        else:
+            await _run_migrator()
+    if REHYDRATE_IN_BACKGROUND:
+        app.state.startup_background_tasks.append(
+            asyncio.create_task(
+                _run_background_startup_step("rehydrate_scheduled_rides", _run_rehydrate_jobs),
+                name="startup:rehydrate_scheduled_rides",
+            )
+        )
+    else:
+        await _run_rehydrate_jobs()
+    startup_logger.info(
+        "startup_ready",
+        extra={"duration_ms": round((time.perf_counter() - startup_started) * 1000, 2)},
+    )
+    try:
+        yield
+    finally:
+        for task in app.state.startup_background_tasks:
+            if not task.done():
+                task.cancel()
+        if app.state.startup_background_tasks:
+            await asyncio.gather(*app.state.startup_background_tasks, return_exceptions=True)
+        scheduler.shutdown()
 # Create the FastAPI app
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 dictConfig(
@@ -261,7 +264,7 @@ tags_metadata = [
     },
 ]
 app = FastAPI(
-    # lifespan=lifespan,
+    lifespan=lifespan,
     title="Door Delivery API",
     summary="On-demand delivery and ride platform API.",
     description=API_DESCRIPTION,
