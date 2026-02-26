@@ -60,6 +60,22 @@ router = APIRouter(prefix="/riders", tags=["Riders"])
 SUCCESS_PAGE_URL = os.getenv("SUCCESS_PAGE_URL", "http://localhost:8080/success")
 ERROR_PAGE_URL   = os.getenv("ERROR_PAGE_URL",   "http://localhost:8080/error")
 
+
+def _extract_place_id(place: object, field_name: str) -> str:
+    if isinstance(place, str):
+        place_id = place.strip()
+    elif isinstance(place, dict):
+        place_id = str(place.get("place_id") or "").strip()
+    else:
+        place_id = str(getattr(place, "place_id", "") or "").strip()
+
+    if not place_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must include a valid place_id",
+        )
+    return place_id
+
 # --- Step 1: Redirect user to Google login ---
 @router.get(
     "/google/auth",
@@ -609,9 +625,10 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
 
     Access: Rider only (valid rider access token required).
     """
-
-    pick_up = await get_place_details(place_id=data.pickup.place_id) # type: ignore
-    drop_off = await get_place_details(place_id=data.destination.place_id) # type: ignore
+    pickup_place_id = _extract_place_id(data.pickup, "pickup")
+    destination_place_id = _extract_place_id(data.destination, "destination")
+    pick_up = await get_place_details(place_id=pickup_place_id)
+    drop_off = await get_place_details(place_id=destination_place_id)
    
     if not pick_up or not pick_up.data:
         raise HTTPException(status_code=400, detail="Invalid pickup location")
@@ -639,9 +656,9 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
     destination = (drop_off.data["lat"],drop_off.data["lng"])
     stops=[]
     if data.stops:
-        index=0
-        for stop in data.stops:
-            _place_details = await get_place_details(place_id=stop)
+        for index, stop in enumerate(data.stops):
+            stop_place_id = _extract_place_id(stop, f"stops[{index}]")
+            _place_details = await get_place_details(place_id=stop_place_id)
             if _place_details and _place_details.data:
                 stops.append((_place_details.data['lat'], _place_details.data['lng']))
 

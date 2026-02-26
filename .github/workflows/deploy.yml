@@ -20,12 +20,12 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
-            # set -e
-            # cd 247-door-delivery-backend
-            # git pull origin master
-            # sudo docker compose down
-            # sudo docker compose build
-            # sudo docker compose up 
+            set -e
+            cd 247-door-delivery-backend
+            git pull origin master
+            sudo docker compose down
+            sudo docker compose build
+            sudo docker compose up 
             # cd ..
             # cd 247-web-app-frontend 
             # git pull origin main

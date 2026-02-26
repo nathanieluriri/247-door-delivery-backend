@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 rider_route = pytest.importorskip("api.v1.rider_route")
 from schemas.response_schema import APIResponse
+from schemas.ride import RidePlace
 
 
 @pytest.fixture
@@ -60,3 +61,27 @@ def test_reverse_geocode_route_success(monkeypatch, client):
     body = response.json()
     assert body["status_code"] == 200
     assert body["data"]["place_id"] == "p1"
+
+
+def test_extract_place_id_accepts_string():
+    place_id = rider_route._extract_place_id("ChIJp35xlwQLThARgR9XDMdJXqE", "pickup")
+    assert place_id == "ChIJp35xlwQLThARgR9XDMdJXqE"
+
+
+def test_extract_place_id_accepts_ride_place():
+    place = RidePlace(
+        place_id="ChIJffTjpUIKThARy577lG3wsqU",
+        name="Demo Place",
+        formatted_address="Demo Address",
+        latitude=6.5244,
+        longitude=3.3792,
+    )
+    place_id = rider_route._extract_place_id(place, "pickup")
+    assert place_id == "ChIJffTjpUIKThARy577lG3wsqU"
+
+
+def test_extract_place_id_rejects_missing_value():
+    with pytest.raises(fastapi.HTTPException) as exc:
+        rider_route._extract_place_id("", "pickup")
+    assert exc.value.status_code == 400
+    assert "pickup must include a valid place_id" in exc.value.detail
