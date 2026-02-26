@@ -76,6 +76,12 @@ class DriverUpdate(BaseModel):
     # Add other fields here 
     firstName: Optional[str] = None
     lastName: Optional[str] = None
+    vehicleType: Optional[VehicleType] = None
+    vehicleMake: Optional[str] = None
+    vehicleModel: Optional[str] = None
+    vehicleColor: Optional[str] = None
+    vehiclePlateNumber: Optional[str] = None
+    vehicleYear: Optional[int] = None
     stripeAccountId: Optional[str] = None
     payoutsEnabled: Optional[bool] = None
     chargesEnabled: Optional[bool] = None

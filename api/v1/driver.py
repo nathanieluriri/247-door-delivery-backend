@@ -385,6 +385,8 @@ async def refresh_driver_tokens(user_data:DriverRefresh,token:accessTokenOut = D
 
 @router.patch(
     "/profile",
+    response_model_exclude={"data": {"password"}},
+    response_model=APIResponse[DriverOut],
     dependencies=[Depends(verify_token_driver_role), Depends(check_driver_account_status)],
     summary="Update driver profile",
     description="Updates the authenticated driver's profile fields.",
@@ -422,6 +424,7 @@ async def update_driver_current_location(
 
 @router.put(
     "/vehicle",
+    response_model_exclude={"data": {"password"}},
     response_model=APIResponse[DriverOut],
     dependencies=[Depends(verify_token_driver_role), Depends(check_driver_account_status)],
     summary="Update driver vehicle",
