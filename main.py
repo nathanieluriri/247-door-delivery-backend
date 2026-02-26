@@ -22,6 +22,7 @@ from pymongo import MongoClient
 import redis
 from apscheduler.triggers.interval import IntervalTrigger
 from starlette.middleware.sessions import SessionMiddleware
+from middlewares.admin_path_normalization_middleware import AdminPathNormalizationMiddleware
 from middlewares.rate_limiting_middleware import RateLimitingMiddleware
 from services.sse_service import cleanup_stale_driver_locations
 MONGO_URI = os.getenv("MONGO_URL")
@@ -293,6 +294,7 @@ app = FastAPI(
     openapi_tags=tags_metadata,
 )
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
+app.add_middleware(AdminPathNormalizationMiddleware)
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(StructuredLoggingMiddleware)
 app.add_middleware(

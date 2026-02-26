@@ -367,13 +367,21 @@ async def list_admin_activity_logs_endpoint(
 # ---------------------------------------------------
 
 @router.get(
-    "/drivers/",
+    "/drivers",
     response_model_exclude={"data": {"__all__": {"password"}}},
     response_model_exclude_none=True,
     response_model=APIResponse[List[DriverOut]],
     dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
     summary="List drivers (admin)",
     description="Returns a paginated list of drivers for administrative use.",
+)
+@router.get(
+    "/drivers/",
+    response_model_exclude={"data": {"__all__": {"password"}}},
+    response_model_exclude_none=True,
+    response_model=APIResponse[List[DriverOut]],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+    include_in_schema=False,
 )
 async def list_of_drivers(start:int= 0, stop:int=100,token:accessTokenOut = Depends(verify_admin_token)):
     """
@@ -708,13 +716,21 @@ async def list_all_background_checks():
 
 
 @router.get(
-    "/riders/",
+    "/riders",
     response_model_exclude={"data": {"__all__": {"password"}}},
     response_model_exclude_none=True,
     response_model=APIResponse[List[RiderOut]],
     dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
     summary="List riders (admin)",
     description="Returns a paginated list of riders for administrative use.",
+)
+@router.get(
+    "/riders/",
+    response_model_exclude={"data": {"__all__": {"password"}}},
+    response_model_exclude_none=True,
+    response_model=APIResponse[List[RiderOut]],
+    dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+    include_in_schema=False,
 )
 async def list_riders(start:int= 0, stop:int=100,token:accessTokenOut = Depends(verify_admin_token)):
     """
