@@ -308,20 +308,25 @@ def _prepare_scheduling_fields(ride_data: RideCreate) -> RideCreate:
     )
     target_status = RideStatus.scheduled if is_scheduled else RideStatus.matching
 
-    return RideCreate(
-        **ride_data.model_dump(),
-        paymentStatus=False,
-        rideStatus=target_status,
-        isScheduled=is_scheduled,
-        scheduledPickupAtMs=pickup_schedule_ms if is_scheduled else None,
-        dispatchStartAtMs=dispatch_start_ms,
-        noDriverPromptedAtMs=None,
-        noDriverDecision=None,
-        noDriverDecisionDeadlineMs=None,
-        paymentDueAtMs=None,
-        paymentAttempts=0,
-        cancelReason=None,
+    # Build payload first, then override mutable lifecycle fields once to avoid
+    # duplicate keyword collisions (e.g. paymentStatus) when reconstructing RideCreate.
+    payload = ride_data.model_dump()
+    payload.update(
+        {
+            "paymentStatus": False,
+            "rideStatus": target_status,
+            "isScheduled": is_scheduled,
+            "scheduledPickupAtMs": pickup_schedule_ms if is_scheduled else None,
+            "dispatchStartAtMs": dispatch_start_ms,
+            "noDriverPromptedAtMs": None,
+            "noDriverDecision": None,
+            "noDriverDecisionDeadlineMs": None,
+            "paymentDueAtMs": None,
+            "paymentAttempts": 0,
+            "cancelReason": None,
+        }
     )
+    return RideCreate(**payload)
 
 
 async def _dispatch_or_schedule_ride(ride: RideOut) -> None:
