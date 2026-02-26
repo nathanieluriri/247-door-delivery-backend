@@ -158,7 +158,7 @@ async def signup_new_admin(
  
     admin_data_dict = admin_data.model_dump() 
     new_admin = AdminCreate(
-      invited_by=token.get("userId"),
+      invited_by=token.get("userId"), # type: ignore
         **admin_data_dict
     )
     items = await add_admin(admin_data=new_admin)
@@ -437,7 +437,7 @@ async def ban_a_driver_from_using_the_app(driverId:str,token:accessTokenOut = De
                         ]
                     )
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="ban_driver",
         target_type="driver",
