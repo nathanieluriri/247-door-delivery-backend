@@ -1,153 +1,207 @@
-Here's a clean, professional, and informative `README.md` template tailored for your `fasterapi` scaffolding tool and FastAPI CRUD project setup.
+# Door Delivery Backend API
 
----
+Backend service for a rider/driver/admin delivery platform built with FastAPI, MongoDB, Redis, Celery, and SSE.
 
-### ✅ `README.md` Template
+## What This Service Does
+- Rider, driver, and admin authentication flows (including Google OAuth for rider/driver)
+- Ride lifecycle management and dispatch
+- Driver onboarding/profile/document handling
+- Payment integration and webhook processing
+- Chat and Server-Sent Events (SSE) updates
+- Push notification token registration and notification delivery pipeline
+- Health checks, structured logging, rate limiting, and metrics
 
-````markdown
-# 🚀 FasterAPI Scaffold CLI
+## Tech Stack
+- Python 3.11
+- FastAPI
+- MongoDB (`motor`, `pymongo`)
+- Redis (`redis`, `redis_om`)
+- Celery + Flower
+- Stripe
+- Authlib (Google OAuth)
+- APScheduler
+- Prometheus FastAPI Instrumentator
 
-FasterAPI is a lightweight scaffolding tool that helps you quickly spin up FastAPI projects with predefined folder structures, schemas, and CRUD repository templates. It's built to save time and enforce consistency.
+## Project Structure
+```text
+api/v1/                 Versioned API routes (admins, drivers, riders, payments, sse, chats)
+core/                   Shared infra/config (db, scheduler, storage, routing, payments)
+services/               Business logic services
+repositories/           Data access layer
+schemas/                Pydantic request/response models
+security/               Auth, JWT, permissions, session/oauth helpers
+middlewares/            Request timing, structured logs, rate limits, admin path normalization
+tests/                  Unit and integration-style tests
+main.py                 App entrypoint and router mounting
+celery_worker.py        Celery worker entrypoint
+docker-compose.yml      Multi-service local stack
+Dockerfile              Container build
+```
 
----
+## API Base and Docs
+- Base API prefix: `/api/v1`
+- Swagger UI: `/docs`
+- ReDoc: `/redoc`
+- Prometheus metrics: `/metrics`
+- Health:
+  - `/health`
+  - `/health-detailed`
 
-## 📦 Features
+## Core Route Groups
+- `/api/v1/admins`
+- `/api/v1/drivers`
+- `/api/v1/riders`
+- `/api/v1/payments`
+- `/api/v1/sse`
+- `/api/v1/chats`
 
-- Auto-generates a complete FastAPI project structure
-- Creates `schemas/` with `Base`, `Create`, `Update`, and `Out` models
-- Generates CRUD logic in `repository/`
-- CLI-powered — just type and scaffold
+## Prerequisites
+- Python 3.11+
+- MongoDB
+- Redis
+- (Optional) Docker + Docker Compose
 
----
-
-## 🏗️ How the Project Was Created
-
-This project was scaffolded using the `fasterapi` CLI tool:
-
+## Quick Start (Docker)
+1. Create/update `.env` with required values.
+2. Start stack:
 ```bash
-fasterapi make_project my_project
-cd my_project
-````
+docker compose up --build
+```
+3. API available at `http://localhost:7860`.
+4. Flower available at `http://localhost:5555`.
 
-To generate schema and repo files:
-
+## Quick Start (Local)
+1. Create virtual env and install dependencies:
 ```bash
-fasterapi make_repo user_profile
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+pip install -r requirements.txt
 ```
 
-This will create:
+2. Ensure MongoDB and Redis are running.
 
-```
-schemas/user_profile.py
-repository/user_profile.py
-```
-
-The schema includes:
-
-* `UserProfileBase`
-* `UserProfileCreate` (with `date_created` and `last_updated`)
-* `UserProfileUpdate` (with `last_updated`)
-* `UserProfileOut` (with `_id`, timestamps)
-
----
-
-## 📁 Project Structure
-
+3. Run API:
 ```bash
-my_project/
-├── api/
-│   └── v1/
-|       └──main.py 
-├── core/
-│   └── db.py
-├── repository/
-│   └── 
-├── schemas/
-│   └── 
-├── services/
-│   └── 
-├── security/
-│   └── auth.py
-|   └── encrypting.py
-|   └── hash.py
-|   └── tokens.py
-├── email_templates/
-│   └── new_sign_in.py
-├── main.py
-└── ...
+fastapi run main.py --host 0.0.0.0 --port 7860
 ```
 
----
-
-## 🔧 CLI Usage
-
-
-
-use it like this:
-
+4. Run worker (separate shell):
 ```bash
-fasterapi make_project <project_name>
-fasterapi make_repo <schema_name>
+celery -A celery_worker worker -l info --pool=custom --concurrency=5
 ```
 
----
-
-## 💡 Example Commands
-
+5. Optional Flower:
 ```bash
-# Create a new FastAPI project
-fasterapi make_project blog_api
-
-# Generate CRUD files for schema `post`
-fasterapi make_repo post
+celery -A celery_worker.celery_app flower --port=5555
 ```
 
----
+## Configuration
+The service reads configuration from environment variables. Keep secrets out of source control.
 
+### Minimum required for local development
+- `DB_TYPE` (`mongodb` or `sqlite`)
+- `DB_NAME` (for MongoDB mode)
+- `MONGO_URL`
+- `CELERY_BROKER_URL`
+- `CELERY_RESULT_BACKEND`
+- `SECRET_KEY`
 
-## 🧪 Requirements
+### Commonly used variables
+- Auth/session:
+  - `SECRETID`
+  - `SESSION_SECRET_KEY`
+  - `SESSION_MAX_AGE_SECONDS`
+  - `SESSION_SAME_SITE`
+  - `SESSION_HTTPS_ONLY`
+  - `ACCESS_TOKEN_EXPIRE_MINUTES`
+  - `REFRESH_TOKEN_EXPIRE_DAYS`
+  - `OAUTH_STATE_SECRET`
+  - `OAUTH_STATE_TTL_SECONDS`
+  - `RETURN_URL_ALLOWLIST`
+  - `RIDER_FRONTEND_URL_LOCAL`
+  - `DRIVER_FRONTEND_URL_LOCAL`
+  - `RIDER_ERROR_PAGE_URL`
+  - `DRIVER_ERROR_PAGE_URL`
+- Google OAuth / Maps:
+  - `GOOGLE_CLIENT_ID`
+  - `GOOGLE_CLIENT_SECRET`
+  - `GOOGLE_CLIENT_ID_FOR_DRIVER_ROLE`
+  - `GOOGLE_CLIENT_SECRET_FOR_DRIVER_ROLE`
+  - `GOOGLE_MAPS_API_KEY`
+- Payments:
+  - `PAYMENT_DEFAULT_PROVIDER`
+  - `STRIPE_API_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+  - `STRIPE_CONNECT_RETURN_URL`
+  - `STRIPE_CONNECT_REFRESH_URL`
+  - `STRIPE_TAX_RATE_ID`
+- Notifications:
+  - `ONESIGNAL_APP_ID`
+  - `ONESIGNAL_API_KEY`
+  - `PUSH_TOKEN_TTL_SECONDS`
+- Email:
+  - `EMAIL_HOST`
+  - `EMAIL_PORT`
+  - `EMAIL_USERNAME`
+  - `EMAIL_PASSWORD`
+  - `EMAIL_USE_TLS`
+- Storage:
+  - `STORAGE_BACKEND`
+  - `STORAGE_LOCAL_ROOT`
+  - `STORAGE_S3_ENDPOINT`
+  - `STORAGE_S3_REGION`
+  - `STORAGE_S3_BUCKET`
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
 
-* Python 3.8+
-* FastAPI
-* Pydantic
-* MongoDB (or change the backend)
+## Notifications
+Driver/rider notification plumbing already exists:
+- Push token registration endpoints:
+  - `POST /api/v1/drivers/push/register`
+  - `GET /api/v1/drivers/push/status`
+  - `POST /api/v1/riders/push/register`
+  - `GET /api/v1/riders/push/status`
+- Tokens are stored in Redis sets with TTL.
+- Notification service attempts push first, then fallback channels (email/SMS behavior depends on provider wiring), with retry and DLQ queues in Redis.
 
----
-
-## ⚙️ Environment Variables
-
-The app uses environment variables for configuration.
-
-### Driver vehicle validation
-
-These settings control acceptable vehicle year ranges for driver profiles:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `DRIVER_VEHICLE_MIN_YEAR` | `2002` | Minimum allowed vehicle year |
-| `DRIVER_VEHICLE_MAX_YEAR` | current year | Maximum allowed vehicle year |
-
----
-
-## ✅ To-Do
-
-* [ ] Add support for route generation
-* [ ] Add PostgreSQL support
-* [ ] Add unit tests
-
----
-
-## 🤝 Contributing
-
-Pull requests are welcome. For major changes, please open an issue first.
-
----
-
-## 📄 License
-
-MIT License
-
+## Tests
+Run:
+```bash
+pytest -q
 ```
 
----
+Useful targeted runs:
+```bash
+pytest -q tests/test_oauth_return.py
+pytest -q tests/test_driver_oauth_callback.py
+pytest -q tests/test_place_service.py
+```
+
+## Operational Notes
+- Rate limits are Redis-backed fixed windows:
+  - Anonymous: `120/min`
+  - Member: `160/min`
+  - Admin: `240/min`
+- Startup creates key Mongo indexes (including refresh token TTL index).
+- APScheduler heartbeat and stale driver presence cleanup run automatically.
+- Admin path normalization middleware avoids slash-based redirects for `/api/v1/admins/...` routes.
+
+## Troubleshooting
+- `307` redirect from `https` to `http` on admin endpoints:
+  - Use latest code with admin path normalization middleware.
+  - Ensure reverse proxy sets forwarded headers correctly (`X-Forwarded-Proto`, `Host`).
+- Push notifications not delivered:
+  - Confirm `ONESIGNAL_APP_ID` and `ONESIGNAL_API_KEY`.
+  - Confirm device token is registered via `/push/register`.
+  - Check Redis connectivity and notification retry/DLQ keys.
+- OAuth callback issues:
+  - Verify Google OAuth client IDs/secrets and callback URLs.
+  - Verify `SESSION_SECRET_KEY`, return URL allowlist/base URL settings.
+
+## Security
+- Do not commit real secrets in `.env`.
+- Rotate exposed keys immediately if leaked.
+- Use HTTPS in production and set secure session settings:
+  - `SESSION_HTTPS_ONLY=true`
+  - strict allowlists for return URLs
 
