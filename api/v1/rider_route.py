@@ -212,7 +212,7 @@ async def auth_callback_rider(request: Request):
                 "status": "success",
                 "access_token": access_token,
                 "refresh_token": refresh_token,
-            },
+            }, # type: ignore
         )
         response = RedirectResponse(
             url=success_url,

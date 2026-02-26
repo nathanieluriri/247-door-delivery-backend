@@ -299,7 +299,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET_KEY,
     max_age=SESSION_MAX_AGE_SECONDS,
-    same_site=SESSION_SAME_SITE,
+    same_site=SESSION_SAME_SITE, # type: ignore
     https_only=SESSION_HTTPS_ONLY,
 )
 redis_url = (
