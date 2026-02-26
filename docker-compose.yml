@@ -12,7 +12,7 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - mongo
+      - mongodb
       - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
@@ -33,10 +33,10 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - mongo
+      - mongodb
       - redis
 
-  mongo:
+  mongodb:
     image: mongo:6.0
     restart: always
     
