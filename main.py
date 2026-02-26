@@ -52,6 +52,8 @@ RUN_STARTUP_MIGRATOR = _flag("RUN_STARTUP_MIGRATOR", True)
 MIGRATOR_IN_BACKGROUND = _flag("MIGRATOR_IN_BACKGROUND", True)
 REHYDRATE_IN_BACKGROUND = _flag("REHYDRATE_IN_BACKGROUND", True)
 REHYDRATE_TIMEOUT_SECONDS = _float_setting("REHYDRATE_TIMEOUT_SECONDS", 20.0)
+STARTUP_INDEXES_IN_BACKGROUND = _flag("STARTUP_INDEXES_IN_BACKGROUND", True)
+STARTUP_INDEX_TIMEOUT_SECONDS = _float_setting("STARTUP_INDEX_TIMEOUT_SECONDS", 20.0)
 startup_logger = logging.getLogger("app.startup")
 async def _run_migrator() -> None:
     started = time.perf_counter()
@@ -71,6 +73,35 @@ async def _run_rehydrate_jobs() -> None:
         await rehydrate_scheduled_ride_jobs()
     startup_logger.info(
         "startup_rehydrate_completed",
+        extra={"duration_ms": round((time.perf_counter() - started) * 1000, 2)},
+    )
+
+
+async def _ensure_startup_indexes() -> None:
+    started = time.perf_counter()
+    await asyncio.gather(
+        db.stripe_events.create_index(
+            [("stripe_id", 1)],
+            unique=True,
+        ),
+        db.chats.create_index(
+            [("rideId", 1)],
+        ),
+        db.reset_tokens.create_index(
+            [("expires_at", ASCENDING)],
+            expireAfterSeconds=0,
+        ),
+        db.reset_tokens.create_index(
+            [("userId", 1)],
+            unique=True,
+            name="unique_active_reset_token",
+            partialFilterExpression={
+                "expires_at": {"$exists": True}
+            },
+        ),
+    )
+    startup_logger.info(
+        "startup_indexes_ready",
         extra={"duration_ms": round((time.perf_counter() - started) * 1000, 2)},
     )
 async def _run_background_startup_step(step: str, runner) -> None:
@@ -110,32 +141,21 @@ async def lifespan(app:FastAPI):
         name="Remove stale driver geo entries",
         replace_existing=True,
     )
-    index_started = time.perf_counter()
-    await asyncio.gather(
-        db.stripe_events.create_index(
-            [("stripe_id", 1)],
-            unique=True,
-        ),
-        db.chats.create_index(
-            [("rideId", 1)],
-        ),
-        db.reset_tokens.create_index(
-            [("expires_at", ASCENDING)],
-            expireAfterSeconds=0,
-        ),
-        db.reset_tokens.create_index(
-            [("userId", 1)],
-            unique=True,
-            name="unique_active_reset_token",
-            partialFilterExpression={
-                "expires_at": {"$exists": True}
-            },
-        ),
-    )
-    startup_logger.info(
-        "startup_indexes_ready",
-        extra={"duration_ms": round((time.perf_counter() - index_started) * 1000, 2)},
-    )
+    if STARTUP_INDEXES_IN_BACKGROUND:
+        app.state.startup_background_tasks.append(
+            asyncio.create_task(
+                _run_background_startup_step("ensure_indexes", _ensure_startup_indexes),
+                name="startup:ensure_indexes",
+            )
+        )
+    else:
+        if STARTUP_INDEX_TIMEOUT_SECONDS > 0:
+            await asyncio.wait_for(
+                _ensure_startup_indexes(),
+                timeout=STARTUP_INDEX_TIMEOUT_SECONDS,
+            )
+        else:
+            await _ensure_startup_indexes()
     configure_payment_manager(force=True)
     scheduler.start()
     if RUN_STARTUP_MIGRATOR:
