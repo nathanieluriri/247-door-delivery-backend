@@ -154,12 +154,15 @@ async def get_driver_sse_eligibility_status(token: accessTokenOut) -> dict:
 
     if not getattr(driver, "vehicleVerified", False):
         reasons.append("Driver vehicle is not verified")
+    if not str(getattr(driver, "phoneNumber", "") or "").strip():
+        reasons.append("Driver phone number is required")
 
     required_types = [
         DocumentType.DRIVER_LICENSE,
         DocumentType.VEHICLE_REGISTRATION,
         DocumentType.INSURANCE,
         DocumentType.BACKGROUND_CHECK,
+        DocumentType.DRIVER_HEADSHOT,
     ]
     docs = await list_latest_documents_for_driver(driver_id=token.userId)
     by_type = {doc.documentType: doc for doc in docs}

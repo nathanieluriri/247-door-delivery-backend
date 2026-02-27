@@ -37,6 +37,7 @@ from schemas.driver import (
     DriverOut,
     DriverBase,
     DriverUpdate,
+    DriverPhoneUpdate,
     DriverRefresh,
     DriverUpdatePassword,
     DriverLocationUpdate,
@@ -399,6 +400,30 @@ async def update_driver_profile(driver_details:DriverUpdateProfile,token:accessT
     """
     driver =  await update_driver_by_id(driver_id=token.userId,driver_data=driver_details)
     return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
+
+
+@router.patch(
+    "/profile/phone",
+    response_model_exclude={"data": {"password"}},
+    response_model=APIResponse[DriverOut],
+    dependencies=[Depends(verify_token_driver_role), Depends(check_driver_account_status)],
+    summary="Update driver phone number",
+    description="Updates only the authenticated driver's phone number.",
+)
+async def update_driver_phone_number(
+    payload: DriverPhoneUpdate,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    """
+    Update the authenticated driver's phone number.
+
+    Access: Driver only (valid driver access token required).
+    """
+    driver = await update_driver_by_id(
+        driver_id=token.userId,
+        driver_data=DriverUpdate(phoneNumber=payload.phoneNumber),
+    )
+    return APIResponse(data=driver, status_code=200, detail="Successfully updated phone number")
      
 
 

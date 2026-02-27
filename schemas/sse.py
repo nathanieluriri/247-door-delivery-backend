@@ -20,10 +20,28 @@ class SSEEventType(str, Enum):
     ride_status_update = "ride_status_update"
     chat_message = "chat_message"
     driver_route_update = "driver_route_update"
+    profile_action_required = "profile_action_required"
 
 
 class SSEAck(BaseModel):
     event_id: str = Field(..., alias="eventId")
+
+    model_config = {"populate_by_name": True}
+
+
+class DriverSnapshot(BaseModel):
+    driver_id: str = Field(..., alias="driverId")
+    first_name: Optional[str] = Field(default=None, alias="firstName")
+    last_name: Optional[str] = Field(default=None, alias="lastName")
+    vehicle_type: Optional[str] = Field(default=None, alias="vehicleType")
+    vehicle_make: Optional[str] = Field(default=None, alias="vehicleMake")
+    vehicle_model: Optional[str] = Field(default=None, alias="vehicleModel")
+    vehicle_color: Optional[str] = Field(default=None, alias="vehicleColor")
+    vehicle_plate_number: Optional[str] = Field(default=None, alias="vehiclePlateNumber")
+    vehicle_year: Optional[int] = Field(default=None, alias="vehicleYear")
+    headshot_url: Optional[str] = Field(default=None, alias="headshotUrl")
+    rating: Optional[float] = Field(default=None, alias="rating")
+    rating_count: Optional[int] = Field(default=None, alias="ratingCount")
 
     model_config = {"populate_by_name": True}
 
@@ -38,6 +56,19 @@ class RideStatusUpdate(BaseModel):
     decision_options: Optional[list[str]] = Field(default=None, alias="decisionOptions")
     action_deadline_ms: Optional[int] = Field(default=None, alias="actionDeadlineMs")
     reason_code: Optional[str] = Field(default=None, alias="reasonCode")
+    driver_snapshot: Optional[DriverSnapshot] = Field(default=None, alias="driverSnapshot")
+
+    model_config = {"populate_by_name": True}
+
+
+class ProfileActionRequiredEvent(BaseModel):
+    action_type: str = Field(..., alias="actionType")
+    message: str
+    field: str
+    required: bool = False
+    severity: str = "info"
+    cta_label: Optional[str] = Field(default=None, alias="ctaLabel")
+    cta_path: Optional[str] = Field(default=None, alias="ctaPath")
 
     model_config = {"populate_by_name": True}
 

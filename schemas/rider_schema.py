@@ -1,7 +1,21 @@
+import re
+
 from schemas.imports import *
-from pydantic import Field
+from pydantic import Field, field_validator
 import time
 from security.hash import hash_password
+
+PHONE_NUMBER_PATTERN = re.compile(r"^[0-9+()\- ]{7,20}$")
+
+
+def _normalize_phone_number(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("Phone number is required")
+    if not PHONE_NUMBER_PATTERN.fullmatch(normalized):
+        raise ValueError("Phone number format is invalid")
+    return normalized
+
 class RiderBase(BaseModel):
     # Add other fields here
     firstName:Optional[str]=''
@@ -9,6 +23,7 @@ class RiderBase(BaseModel):
     email:EmailStr
     password:str | bytes
     loginType:Optional[LoginType]=LoginType.password
+    phoneNumber: Optional[str] = None
     pass
     model_config = {
         "json_schema_extra": {
@@ -23,6 +38,13 @@ class RiderBase(BaseModel):
             ]
         }
     }
+
+    @field_validator("phoneNumber")
+    @classmethod
+    def validate_phone_number(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _normalize_phone_number(value)
 
 class RiderRefresh(BaseModel):
     # Add other fields here 
@@ -51,7 +73,25 @@ class RiderUpdate(BaseModel):
     # Add other fields here 
     firstName: Optional[str] = None
     lastName: Optional[str] = None
+    phoneNumber: Optional[str] = None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+
+    @field_validator("phoneNumber")
+    @classmethod
+    def validate_phone_number(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _normalize_phone_number(value)
+
+
+class RiderPhoneUpdate(BaseModel):
+    phoneNumber: str
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+
+    @field_validator("phoneNumber")
+    @classmethod
+    def validate_phone_number(cls, value: str) -> str:
+        return _normalize_phone_number(value)
    
 class RiderUpdatePassword(BaseModel):
     # Add other fields here 
@@ -72,6 +112,7 @@ class RiderOut(RiderBase):
     # Add other fields here 
     firstName:Optional[str]=''
     lastName:Optional[str]='' 
+    phoneNumber: Optional[str] = None
     accountStatus:Optional[AccountStatus]=AccountStatus.ACTIVE
     id: Optional[str] = Field(
         default=None,

@@ -20,6 +20,7 @@ from schemas.rider_schema import (
     RiderOut,
     RiderBase,
     RiderUpdate,
+    RiderPhoneUpdate,
     RiderRefresh,
     LoginType,
     RiderUpdatePassword,
@@ -32,10 +33,10 @@ from services.place_service import (
     get_autocomplete,
     get_place_details,
     get_reverse_geocode,
-    nearby_drivers,
 )
 from services.rating_service import add_rating, retrieve_rating_by_user_id
 from services.ride_service import add_ride, decide_no_driver_for_ride, generate_public_ride_sharing_link_for_rider, retrieve_rides_by_user_id, retrieve_rides_by_user_id_and_ride_id, retrieve_shared_ride_by_share_id, update_ride_by_id
+from services.sse_service import list_eligible_driver_ids_for_request
 from services.rider_service import (
     add_rider,
     remove_rider,
@@ -408,6 +409,30 @@ async def update_rider_profile(rider_details:RiderUpdate,token:accessTokenOut = 
     rider = await update_rider_by_id(user_id=token.userId,user_data=rider_details)
     return APIResponse(data=rider,detail="Rider Profile updated successfully", status_code=200)
 
+
+@router.patch(
+    "/profile/phone",
+    response_model_exclude={"data": {"password"}},
+    response_model=APIResponse[RiderOut],
+    dependencies=[Depends(verify_token_rider_role)],
+    summary="Update rider phone number",
+    description="Updates only the authenticated rider's phone number.",
+)
+async def update_rider_phone_number(
+    payload: RiderPhoneUpdate,
+    token: accessTokenOut = Depends(verify_token_rider_role),
+):
+    """
+    Update the authenticated rider's phone number.
+
+    Access: Rider only (valid rider access token required).
+    """
+    rider = await update_rider_by_id(
+        user_id=token.userId,
+        user_data=RiderUpdate(phoneNumber=payload.phoneNumber),
+    )
+    return APIResponse(data=rider, detail="Rider phone number updated successfully", status_code=200)
+
 # -------------------------------
 # -------RATING MANAGEMENT------- 
 # -------------------------------
@@ -722,12 +747,15 @@ async def requesting_a_new_ride_or_delivery_request(data:RideBase,token:accessTo
         raise HTTPException(status_code=400, detail="pickupSchedule must be a future Unix epoch in milliseconds")
 
     if not is_scheduled:
-        available_drivers = await nearby_drivers(
-            pickup_lat=pick_up.data["lat"],
-            pickup_lon=pick_up.data["lng"],
+        eligible_driver_ids = await list_eligible_driver_ids_for_request(
+            pickup_location=(pick_up.data["lat"], pick_up.data["lng"]),
+            vehicle_type=data.vehicleType.value,
         )
-        if available_drivers <= 0:
-            raise HTTPException(status_code=404,detail="No Driver's available within 5km radius for pickup at this moment")
+        if not eligible_driver_ids:
+            raise HTTPException(
+                status_code=404,
+                detail="No compatible drivers available for requested vehicle type within 5km.",
+            )
 
     destination = (drop_off.data["lat"],drop_off.data["lng"])
     stops=[]

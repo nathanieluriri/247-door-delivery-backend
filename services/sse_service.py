@@ -20,12 +20,15 @@ from core.metrics import (
     sse_queue_overflow_drops_total,
 )
 from core.routing_config import DeliveryRouteResponse
+from services.driver_snapshot_service import build_driver_sse_snapshot
 from services.notification_service import send_notification
 from services.notification_targets import get_push_tokens, get_user_email
 from schemas.imports import RideStatus
 from schemas.sse import (
     SSEEvent,
+    DriverSnapshot,
     RideStatusUpdate,
+    ProfileActionRequiredEvent,
     ChatMessageEvent,
     RideRequestEvent,
     DriverRouteUpdate,
@@ -47,6 +50,7 @@ DRIVER_DISCOVERY_RADIUS_KM = float(os.getenv("DRIVER_DISCOVERY_RADIUS_KM", "5"))
 DRIVER_META_TTL_SECONDS = int(os.getenv("DRIVER_META_TTL_SECONDS", "120"))
 DRIVER_GEO_INDEX = os.getenv("DRIVER_GEO_INDEX", "drivers:geo_index")
 DRIVER_DISPATCH_LOG_FILE = os.getenv("DRIVER_DISPATCH_LOG_FILE", "log_file.md")
+PROFILE_ACTION_PROMPT_COOLDOWN_SECONDS = int(os.getenv("PROFILE_ACTION_PROMPT_COOLDOWN_SECONDS", "86400"))
 
 
 def _append_dispatch_log(line: str) -> None:
@@ -80,6 +84,10 @@ def _driver_presence_key(driver_id: str) -> str:
 
 def _active_session_key(user_type: str, user_id: str) -> str:
     return f"sse:session:{user_type}:{user_id}"
+
+
+def _profile_action_prompt_key(user_type: str, user_id: str, action_type: str) -> str:
+    return f"sse:profile_action_prompt:{user_type}:{user_id}:{action_type}"
 
 
 def _format_sse(event: SSEEvent) -> str:
@@ -212,6 +220,58 @@ def _normalize_vehicle_type(value: Optional[str]) -> Optional[str]:
         normalized = normalized.split(".")[-1]
     return normalized
 
+
+async def list_eligible_driver_ids_for_request(
+    pickup_location: tuple[float, float],
+    vehicle_type: Optional[str],
+) -> list[str]:
+    pickup_lat, pickup_lng = pickup_location
+    requested_vehicle = _normalize_vehicle_type(vehicle_type)
+    now = int(time.time())
+    driver_ids = await async_redis.georadius(
+        name=DRIVER_GEO_INDEX,
+        longitude=pickup_lng,
+        latitude=pickup_lat,
+        radius=DRIVER_DISCOVERY_RADIUS_KM,
+        unit="km",
+    )
+    eligible_driver_ids: list[str] = []
+    for raw_driver_id in driver_ids:
+        driver_id = str(raw_driver_id)
+        meta = await get_driver_presence(driver_id)
+        if not meta:
+            continue
+        if str(meta.get("account_status") or "").strip().lower() != "active":
+            continue
+        if str(meta.get("profile_complete") or "").strip().lower() not in {"1", "true"}:
+            continue
+
+        driver_vehicle = _normalize_vehicle_type(meta.get("vehicle_type"))
+        if requested_vehicle and driver_vehicle != requested_vehicle:
+            continue
+
+        driver_lat = meta.get("latitude")
+        driver_lng = meta.get("longitude")
+        if driver_lat is None or driver_lng is None:
+            continue
+        try:
+            float(driver_lat)
+            float(driver_lng)
+        except (TypeError, ValueError):
+            continue
+
+        last_seen = meta.get("last_seen")
+        try:
+            last_seen = int(float(last_seen)) if last_seen is not None else None
+        except (TypeError, ValueError):
+            last_seen = None
+        if last_seen is None or (now - last_seen) > DRIVER_META_TTL_SECONDS:
+            continue
+
+        eligible_driver_ids.append(driver_id)
+    return eligible_driver_ids
+
+
 async def update_driver_presence(
     driver_id: str,
     latitude: float,
@@ -228,10 +288,7 @@ async def update_driver_presence(
     )
     try:
         geo_args = (float(longitude), float(latitude), str(driver_id))
-        await async_redis.geoadd(DRIVER_GEO_INDEX, geo_args,nx=True)
-        # await async_redis.geoadd(DRIVER_GEO_INDEX,float(longitude),float(latitude),str(driver_id),) # type: ignore
-
-        
+        await async_redis.geoadd(DRIVER_GEO_INDEX, geo_args)
         _append_dispatch_log(f"update_driver_presence:geoadd_ok id={driver_id}")
     except Exception as exc:
         _append_dispatch_log(f"update_driver_presence:geoadd_error id={driver_id} error={exc}")
@@ -509,7 +566,7 @@ async def publish_ride_status_update(
     reason_code: Optional[str] = None,
 ) -> None:
     status_value = status.value if hasattr(status, "value") else str(status)
-    payload = RideStatusUpdate(
+    base_payload = RideStatusUpdate(
         rideId=ride_id,
         status=status,
         message=message,
@@ -521,7 +578,19 @@ async def publish_ride_status_update(
         reasonCode=reason_code,
     )
     if rider_id:
-        await publish_event("rider", rider_id, "ride_status_update", payload)
+        rider_payload = base_payload
+        if driver_id:
+            try:
+                snapshot_data = await build_driver_sse_snapshot(driver_id)
+                if snapshot_data:
+                    rider_payload = base_payload.model_copy(
+                        update={
+                            "driver_snapshot": DriverSnapshot(**snapshot_data),
+                        }
+                    )
+            except Exception:
+                rider_payload = base_payload
+        await publish_event("rider", rider_id, "ride_status_update", rider_payload)
         _schedule_notification(
             "rider",
             rider_id,
@@ -530,7 +599,7 @@ async def publish_ride_status_update(
             allow_email=True,
         )
     if driver_id:
-        await publish_event("driver", driver_id, "ride_status_update", payload)
+        await publish_event("driver", driver_id, "ride_status_update", base_payload)
         _schedule_notification(
             "driver",
             driver_id,
@@ -607,6 +676,37 @@ async def publish_driver_route_update(
         await publish_event("driver", driver_id, "driver_route_update", payload)
 
 
+async def publish_profile_action_required(
+    *,
+    user_type: str,
+    user_id: str,
+    action_type: str,
+    message: str,
+    field: str,
+    required: bool = False,
+    severity: str = "info",
+    cta_label: Optional[str] = None,
+    cta_path: Optional[str] = None,
+    cooldown_seconds: Optional[int] = PROFILE_ACTION_PROMPT_COOLDOWN_SECONDS,
+) -> Optional[SSEEvent]:
+    if cooldown_seconds is not None and cooldown_seconds > 0:
+        dedupe_key = _profile_action_prompt_key(user_type, user_id, action_type)
+        if await async_redis.exists(dedupe_key):
+            return None
+        await async_redis.set(dedupe_key, "1", ex=cooldown_seconds)
+
+    payload = ProfileActionRequiredEvent(
+        actionType=action_type,
+        message=message,
+        field=field,
+        required=required,
+        severity=severity,
+        ctaLabel=cta_label,
+        ctaPath=cta_path,
+    )
+    return await publish_event(user_type, user_id, SSEEventType.profile_action_required.value, payload)
+
+
 async def publish_ride_request_to_drivers(
     payload: RideRequestEvent,
     pickup_location: Optional[tuple[float, float]] = None,
@@ -625,79 +725,16 @@ async def publish_ride_request_to_drivers(
         f"publish_ride_request_to_drivers: ride_id={payload.ride_id} requested_vehicle={requested_vehicle} "
         f"pickup_lat={pickup_lat} pickup_lng={pickup_lng}"
     )
-    count = 0
-    driver_ids = await async_redis.georadius(
-        name=DRIVER_GEO_INDEX,
-        longitude=pickup_lng,
-        latitude=pickup_lat,
-        radius=DRIVER_DISCOVERY_RADIUS_KM,
-        unit="km",
+    eligible_driver_ids = await list_eligible_driver_ids_for_request(
+        pickup_location=(pickup_lat, pickup_lng),
+        vehicle_type=payload.vehicle_type,
     )
     _append_dispatch_log(
-        f"geo_candidates: count={len(driver_ids)} radius_km={DRIVER_DISCOVERY_RADIUS_KM}"
+        f"eligible_candidates: count={len(eligible_driver_ids)} radius_km={DRIVER_DISCOVERY_RADIUS_KM}"
     )
-    for driver_id in driver_ids:
-        _append_dispatch_log(f"driver_candidate: id={driver_id}")
-        meta = await get_driver_presence(driver_id)
-        if not meta:
-            _append_dispatch_log(f"driver_skip: id={driver_id} reason=missing_presence")
-            continue
-        if meta.get("account_status") not in {"active"}:
-            _append_dispatch_log(
-                f"driver_skip: id={driver_id} reason=account_status "
-                f"value={meta.get('account_status')}"
-            )
-            continue
-
-        if meta.get("profile_complete") not in {"1", "true", "True", "TRUE"}:
-            _append_dispatch_log(
-                f"driver_skip: id={driver_id} reason=profile_complete "
-                f"value={meta.get('profile_complete')}"
-            )
-            continue
-
-        driver_vehicle = _normalize_vehicle_type(meta.get("vehicle_type"))
-        _append_dispatch_log(
-            f"driver_meta_vehicle: id={driver_id} vehicle_type={driver_vehicle}"
-        )
-        if requested_vehicle and driver_vehicle and driver_vehicle != requested_vehicle:
-            _append_dispatch_log(
-                f"driver_skip: id={driver_id} reason=vehicle_mismatch "
-                f"driver={driver_vehicle} requested={requested_vehicle}"
-            )
-            continue
-
-        if requested_vehicle and not driver_vehicle:
-            _append_dispatch_log(
-                f"driver_skip: id={driver_id} reason=vehicle_missing requested={requested_vehicle}"
-            )
-            continue
-
-        driver_lat = meta.get("latitude")
-        driver_lng = meta.get("longitude")
-        if pickup_lat is None or pickup_lng is None or driver_lat is None or driver_lng is None:
-            _append_dispatch_log(f"driver_skip: id={driver_id} reason=missing_coords")
-            continue
-
-        try:
-            driver_lat = float(driver_lat)
-            driver_lng = float(driver_lng)
-        except (TypeError, ValueError):
-            _append_dispatch_log(f"driver_skip: id={driver_id} reason=invalid_coords")
-            continue
-
-        last_seen = meta.get("last_seen")
-        try:
-            last_seen = int(float(last_seen)) if last_seen is not None else None
-        except (TypeError, ValueError):
-            last_seen = None
-        if last_seen is None or (int(time.time()) - last_seen) > DRIVER_META_TTL_SECONDS:
-            _append_dispatch_log(
-                f"driver_skip: id={driver_id} reason=stale last_seen={last_seen}"
-            )
-            continue
-
-        await publish_event("driver", driver_id, "ride_request", payload)
+    count = 0
+    for driver_id in eligible_driver_ids:
+        await publish_event("driver", str(driver_id), "ride_request", payload)
         _schedule_notification(
             "driver",
             str(driver_id),

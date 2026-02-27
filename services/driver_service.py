@@ -381,7 +381,10 @@ async def update_driver_location(driver_id: str, location: DriverLocationUpdate)
         raise HTTPException(status_code=400, detail="Invalid driver ID format")
     driver = await retrieve_driver_by_driver_id(id=driver_id)
     if not getattr(driver, "profileComplete", False):
-        raise HTTPException(status_code=400, detail="Vehicle details must be set before updating location")
+        raise HTTPException(
+            status_code=400,
+            detail="Driver profile incomplete: vehicle details and phone number are required before updating location",
+        )
     try:
         latitude = float(location.latitude)
         longitude = float(location.longitude)

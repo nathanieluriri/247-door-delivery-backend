@@ -8,7 +8,8 @@ from schemas.sse import SSEAck, SSEEventType
 from schemas.tokens_schema import accessTokenOut
 from security.auth import verify_token_driver_role, verify_token_rider_role
 from security.account_status_checks import check_driver_sse_eligibility, get_driver_sse_eligibility_status
-from services.sse_service import ack_event, stream_events
+from services.rider_service import retrieve_rider_by_rider_id
+from services.sse_service import ack_event, stream_events, publish_profile_action_required
 
 
 router = APIRouter(prefix="/sse", tags=["SSE"])
@@ -93,6 +94,23 @@ async def stream_rider_events(
 
     Access: Rider only (valid rider access token required).
     """
+    try:
+        rider = await retrieve_rider_by_rider_id(id=token.userId)
+        if not str(getattr(rider, "phoneNumber", "") or "").strip():
+            await publish_profile_action_required(
+                user_type="rider",
+                user_id=token.userId,
+                action_type="add_phone_number",
+                message="It would be nice to add your phone number for easier contact.",
+                field="phoneNumber",
+                required=False,
+                severity="info",
+                cta_label="Add phone number",
+                cta_path="/profile/phone",
+            )
+    except Exception:
+        pass
+
     allowed_types = [event_type.value for event_type in event_types] if event_types else None
     return StreamingResponse(
         stream_events(

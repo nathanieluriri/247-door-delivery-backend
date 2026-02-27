@@ -22,6 +22,7 @@ class DocumentType(str, Enum):
     VEHICLE_REGISTRATION = "vehicle_registration"
     INSURANCE = "insurance"
     BACKGROUND_CHECK = "background_check"
+    DRIVER_HEADSHOT = "driver_headshot"
 
 
 class DocumentSortBy(str, Enum):

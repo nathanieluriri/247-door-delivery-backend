@@ -8,6 +8,7 @@
 # ============================================================================
 
 import os
+import re
 import time
 from schemas.imports import *
 from core.vehicles_config import VehicleType
@@ -17,6 +18,16 @@ from security.hash import hash_password
 
 VEHICLE_MIN_YEAR = int(os.getenv("DRIVER_VEHICLE_MIN_YEAR", "2002"))
 VEHICLE_MAX_YEAR = int(os.getenv("DRIVER_VEHICLE_MAX_YEAR", str(time.gmtime().tm_year)))
+PHONE_NUMBER_PATTERN = re.compile(r"^[0-9+()\- ]{7,20}$")
+
+
+def _normalize_phone_number(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("Phone number is required")
+    if not PHONE_NUMBER_PATTERN.fullmatch(normalized):
+        raise ValueError("Phone number format is invalid")
+    return normalized
 
 class DriverBase(BaseModel):
     # Add other fields here 
@@ -37,6 +48,7 @@ class DriverCreate(DriverBase):
     # Add other fields here
     firstName:Optional[str]=''
     lastName:Optional[str]='' 
+    phoneNumber: Optional[str] = None
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
@@ -48,10 +60,18 @@ class DriverCreate(DriverBase):
                     "password": "StrongPass123!",
                     "firstName": "Alex",
                     "lastName": "Morgan",
+                    "phoneNumber": "+447123456789",
                 }
             ]
         }
     }
+    @field_validator("phoneNumber")
+    @classmethod
+    def validate_phone_number(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _normalize_phone_number(value)
+
     @model_validator(mode='after')
     def obscure_password(self):
         self.password=hash_password(self.password)
@@ -76,6 +96,7 @@ class DriverUpdate(BaseModel):
     # Add other fields here 
     firstName: Optional[str] = None
     lastName: Optional[str] = None
+    phoneNumber: Optional[str] = None
     vehicleType: Optional[VehicleType] = None
     vehicleMake: Optional[str] = None
     vehicleModel: Optional[str] = None
@@ -96,6 +117,23 @@ class DriverUpdate(BaseModel):
     vehicleVerificationNotes: Optional[str] = None
     accountStatus:Optional[AccountStatus]=None
     last_updated: int = Field(default_factory=lambda: int(time.time()))
+
+    @field_validator("phoneNumber")
+    @classmethod
+    def validate_phone_number(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _normalize_phone_number(value)
+
+
+class DriverPhoneUpdate(BaseModel):
+    phoneNumber: str
+    last_updated: int = Field(default_factory=lambda: int(time.time()))
+
+    @field_validator("phoneNumber")
+    @classmethod
+    def validate_phone_number(cls, value: str) -> str:
+        return _normalize_phone_number(value)
    
 class DriverUpdateStripeAccountId(BaseModel):
     # Add other fields here 
@@ -143,6 +181,7 @@ class DriverOut(DriverBase):
     # Add other fields here 
     firstName:Optional[str]=''
     lastName:Optional[str]=''     
+    phoneNumber: Optional[str] = None
     stripeAccountId: Optional[str] = None
     payoutsEnabled: Optional[bool] = None
     chargesEnabled: Optional[bool] = None
@@ -198,6 +237,7 @@ class DriverOut(DriverBase):
     @model_validator(mode="after")
     def set_profile_complete(self):
         required_fields = [
+            self.phoneNumber,
             self.vehicleType,
             self.vehicleMake,
             self.vehicleModel,
