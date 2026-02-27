@@ -467,7 +467,7 @@ async def suspend_driver_from_using_the_app(driverId: str, token: accessTokenOut
         ],
     )
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="suspend_driver",
         target_type="driver",
@@ -490,7 +490,7 @@ async def deactivate_driver_account(driverId: str, token: accessTokenOut = Depen
     driver_data = DriverUpdateAccountStatus(accountStatus=AccountStatus.DEACTIVATED)
     update = await update_driver_by_id_admin_func(driver_id=driverId, driver_data=driver_data)
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="deactivate_driver",
         target_type="driver",
@@ -519,7 +519,7 @@ async def approve_a_driver_to_use_the_driver_app(driverId:str,token:accessTokenO
     driver_data = DriverUpdateAccountStatus(accountStatus=AccountStatus.ACTIVE)
     update =await update_driver_by_id_admin_func(driver_id=driverId,driver_data=driver_data)
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="approve_driver",
         target_type="driver",
@@ -557,7 +557,7 @@ async def review_driver_document(
         except Exception:
             pass
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="review_driver_document",
         target_type="driver_document",
@@ -591,7 +591,7 @@ async def verify_driver_vehicle_information(
     )
     updated = await update_driver_by_id(driver_id=driverId, driver_data=update)
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="verify_driver_vehicle",
         target_type="driver",
@@ -649,7 +649,7 @@ async def update_background_check(
         driver_id=driverId, status=status, notes=notes, reference=referenceId
     )
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="background_check_update",
         target_type="driver",
