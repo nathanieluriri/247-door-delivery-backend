@@ -1,4 +1,5 @@
 from schemas.imports import RideStatus
+from schemas.ride import RideRatingStatus
 from schemas.sse import RideStatusUpdate
 
 
@@ -12,6 +13,12 @@ def test_ride_status_update_action_fields_serialize_with_aliases():
         decisionOptions=["keep_searching", "cancel_ride"],
         actionDeadlineMs=1735689600000,
         reasonCode="no_driver_at_pickup",
+        ratingStatus=RideRatingStatus(
+            riderMustRate=True,
+            driverMustRate=True,
+            riderRated=False,
+            driverRated=False,
+        ),
     )
 
     data = payload.model_dump(by_alias=True, mode="json", exclude_none=True)
@@ -23,3 +30,5 @@ def test_ride_status_update_action_fields_serialize_with_aliases():
     assert data["decisionOptions"] == ["keep_searching", "cancel_ride"]
     assert data["actionDeadlineMs"] == 1735689600000
     assert data["reasonCode"] == "no_driver_at_pickup"
+    assert data["ratingStatus"]["riderMustRate"] is True
+    assert data["ratingStatus"]["driverMustRate"] is True

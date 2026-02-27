@@ -38,6 +38,15 @@ class RidePlace(BaseModel):
     )
 
 
+class RideRatingStatus(BaseModel):
+    riderMustRate: bool = False
+    driverMustRate: bool = False
+    riderRated: bool = False
+    driverRated: bool = False
+    riderRatedAt: Optional[int] = None
+    driverRatedAt: Optional[int] = None
+
+
 class RideBase(BaseModel):
     pickup: Union[RidePlace, str]
     destination: Union[RidePlace, str]
@@ -157,6 +166,7 @@ class RideOut(RideBase):
     origin: Optional[Location] = None
     paymentLink:Optional[str]=None
     map: Optional[DeliveryRouteResponse] = None
+    ratingStatus: Optional[RideRatingStatus] = None
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

@@ -184,7 +184,7 @@ async def login_admin(
 
     Access: Public (no auth).
     """
-    items = await authenticate_admin(admin_data=admin_data)
+    items = await authenticate_admin(admin_data=admin_data) # type: ignore
     # The `authenticate_admin` function should raise an HTTPException 
     # (e.g., 401 Unauthorized) on failure.
     
@@ -769,7 +769,7 @@ async def search_riders_by_email_and_status(
     )
     results = [
         UserOut(
-            id=rider.id,
+            id=rider.id, # type: ignore
             email=rider.email,
             firstName=rider.firstName,
             lastName=rider.lastName,
@@ -826,7 +826,7 @@ async def ban_a_rider_from_using_the_app(riderId:str,token:accessTokenOut = Depe
                         ]
                     )
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="ban_rider",
         target_type="rider",
@@ -856,7 +856,7 @@ async def suspend_rider_from_using_the_app(riderId: str, token: accessTokenOut =
         ],
     )
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="suspend_rider",
         target_type="rider",

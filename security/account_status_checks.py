@@ -9,6 +9,7 @@ from services.admin_service import retrieve_admin_by_admin_id
 from services.rider_service import retrieve_rider_by_rider_id
 from services.driver_service import retrieve_driver_by_driver_id
 from services.driver_document_service import list_latest_documents_for_driver
+from services.ride_rating_service import find_pending_rating_for_user
 
 
 def _extract_user_id(token) -> str | None:
@@ -130,6 +131,40 @@ async def check_driver_account_status(
     return driver
 
 
+async def check_rider_rating_gate(
+    request: Request,
+    token: accessTokenOut = Depends(verify_token_rider_role),
+):
+    pending = await find_pending_rating_for_user(token.userId, "rider")
+    if pending:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "RATING_REQUIRED_RIDER",
+                "rideId": pending["rideId"],
+                "message": "Rate your last completed ride before requesting another ride.",
+            },
+        )
+    return True
+
+
+async def check_driver_rating_gate(
+    request: Request,
+    token: accessTokenOut = Depends(verify_token_driver_role),
+):
+    pending = await find_pending_rating_for_user(token.userId, "driver")
+    if pending:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "RATING_REQUIRED_DRIVER",
+                "rideId": pending["rideId"],
+                "message": "Rate your last completed ride before continuing driver operations.",
+            },
+        )
+    return True
+
+
 async def check_driver_sse_eligibility(
     request: Request,
     token: accessTokenOut = Depends(verify_token_driver_role),
@@ -156,6 +191,11 @@ async def get_driver_sse_eligibility_status(token: accessTokenOut) -> dict:
         reasons.append("Driver vehicle is not verified")
     if not str(getattr(driver, "phoneNumber", "") or "").strip():
         reasons.append("Driver phone number is required")
+    pending_rating = await find_pending_rating_for_user(token.userId, "driver")
+    if pending_rating:
+        reasons.append(
+            f"RATING_REQUIRED_DRIVER: rate ride {pending_rating['rideId']} before going online"
+        )
 
     required_types = [
         DocumentType.DRIVER_LICENSE,

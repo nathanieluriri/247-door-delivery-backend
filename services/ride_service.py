@@ -41,6 +41,7 @@ from schemas.imports import ALLOWED_RIDE_STATUS_TRANSITIONS, RIDE_REFUND_RULES, 
 from schemas.ride import RideCreate, RideUpdate, RideOut, RideShareLinkOut
 from schemas.payout import PayoutCreate
 from services.driver_route_service import maybe_publish_driver_route_for_ride
+from services.ride_rating_service import build_ride_rating_status
 
 
 FRONTEND_SHARE_RIDE_URL = os.getenv("FRONTEND_SHARE_RIDE_URL", "http://localhost:8080/share/ride")
@@ -144,32 +145,30 @@ async def _attach_driver_snapshot_to_ride_update(
 
 
 async def _enrich_ride_with_driver_snapshot(ride: RideOut) -> RideOut:
-    if not ride.driverId:
-        return ride
-
     update_payload: dict[str, Any] = {}
-    refreshed_headshot_url = resolve_driver_headshot_url(
-        file_key=ride.driverHeadshotFileKey,
-        fallback_url=ride.driverHeadshotUrl,
-    )
-    if refreshed_headshot_url and refreshed_headshot_url != ride.driverHeadshotUrl:
-        update_payload["driverHeadshotUrl"] = refreshed_headshot_url
+    if ride.driverId:
+        refreshed_headshot_url = resolve_driver_headshot_url(
+            file_key=ride.driverHeadshotFileKey,
+            fallback_url=ride.driverHeadshotUrl,
+        )
+        if refreshed_headshot_url and refreshed_headshot_url != ride.driverHeadshotUrl:
+            update_payload["driverHeadshotUrl"] = refreshed_headshot_url
 
-    missing_fields = [
-        field
-        for field in DRIVER_RIDE_SNAPSHOT_FIELDS
-        if getattr(ride, field, None) in (None, "")
-    ]
-    if missing_fields:
-        snapshot = await build_driver_ride_snapshot(ride.driverId)
-        for field in missing_fields:
-            value = snapshot.get(field)
-            if value is not None:
-                update_payload[field] = value
+        missing_fields = [
+            field
+            for field in DRIVER_RIDE_SNAPSHOT_FIELDS
+            if getattr(ride, field, None) in (None, "")
+        ]
+        if missing_fields:
+            snapshot = await build_driver_ride_snapshot(ride.driverId)
+            for field in missing_fields:
+                value = snapshot.get(field)
+                if value is not None:
+                    update_payload[field] = value
 
-    if not update_payload:
-        return ride
-    return ride.model_copy(update=update_payload)
+    enriched = ride.model_copy(update=update_payload) if update_payload else ride
+    rating_status = await build_ride_rating_status(enriched)
+    return enriched.model_copy(update={"ratingStatus": rating_status})
 
 
 async def _enrich_rides_with_driver_snapshot(rides: List[RideOut]) -> List[RideOut]:
@@ -1006,6 +1005,7 @@ async def update_ride_by_id(
                 rider_id=ride.userId,
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
+                rating_status=result.ratingStatus,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
@@ -1135,6 +1135,7 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
                 rider_id=ride.userId,
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
+                rating_status=result.ratingStatus,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
@@ -1243,6 +1244,7 @@ async def update_ride_with_ride_id(ride_id: str, payload: dict ) -> dict:
                 rider_id=current_ride.userId,
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
+                rating_status=result.ratingStatus,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")

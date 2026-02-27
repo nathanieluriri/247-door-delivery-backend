@@ -124,6 +124,15 @@ async def _ensure_startup_indexes() -> None:
             expireAfterSeconds=0,
             name="refresh_token_expires_idx",
         ),
+        db.ratings.create_index(
+            [("rideId", 1), ("raterId", 1)],
+            unique=True,
+            name="rating_ride_rater_unique",
+            partialFilterExpression={
+                "rideId": {"$exists": True},
+                "raterId": {"$exists": True},
+            },
+        ),
     )
     startup_logger.info(
         "startup_indexes_ready",

@@ -34,6 +34,7 @@ from schemas.sse import (
     DriverRouteUpdate,
     SSEEventType,
 )
+from schemas.ride import RideRatingStatus
 
 
 RETRY_AFTER_SECONDS = int(os.getenv("SSE_RETRY_AFTER_SECONDS", "5"))
@@ -564,6 +565,7 @@ async def publish_ride_status_update(
     decision_options: Optional[list[str]] = None,
     action_deadline_ms: Optional[int] = None,
     reason_code: Optional[str] = None,
+    rating_status: Optional[RideRatingStatus] = None,
 ) -> None:
     status_value = status.value if hasattr(status, "value") else str(status)
     base_payload = RideStatusUpdate(
@@ -576,6 +578,7 @@ async def publish_ride_status_update(
         decisionOptions=decision_options,
         actionDeadlineMs=action_deadline_ms,
         reasonCode=reason_code,
+        ratingStatus=rating_status,
     )
     if rider_id:
         rider_payload = base_payload

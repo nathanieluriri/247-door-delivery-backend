@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from schemas.imports import RideStatus, UserType
 from core.routing_config import DeliveryRouteResponse
+from schemas.ride import RideRatingStatus
 
 
 class SSEEvent(BaseModel):
@@ -57,6 +58,7 @@ class RideStatusUpdate(BaseModel):
     action_deadline_ms: Optional[int] = Field(default=None, alias="actionDeadlineMs")
     reason_code: Optional[str] = Field(default=None, alias="reasonCode")
     driver_snapshot: Optional[DriverSnapshot] = Field(default=None, alias="driverSnapshot")
+    rating_status: Optional[RideRatingStatus] = Field(default=None, alias="ratingStatus")
 
     model_config = {"populate_by_name": True}
 

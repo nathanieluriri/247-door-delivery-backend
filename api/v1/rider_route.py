@@ -26,7 +26,7 @@ from schemas.rider_schema import (
     RiderUpdatePassword,
 )
 from repositories.tokens_repo import delete_access_token, delete_refresh_tokens_by_previous_access_token
-from security.account_status_checks import check_rider_account_status
+from security.account_status_checks import check_rider_account_status, check_rider_rating_gate
 from services.address_service import add_address, remove_address, retrieve_address_by_user_id, update_address_by_id
 from services.place_service import (
     calculate_fare_using_vehicle_config_and_distance,
@@ -485,7 +485,7 @@ async def rate_driver_after_ride(rating_data:RatingBase,token:accessTokenOut = D
     """
     
     rider_rating = RatingCreate(**rating_data.model_dump(),raterId=token.userId)
-    rating = await add_rating(rating_data=rider_rating)
+    rating = await add_rating(rating_data=rider_rating, riderId=token.userId)
     return APIResponse(data=rating,status_code=200,detail="Successfully Rated Driver")
 
 
@@ -715,7 +715,7 @@ async def ride_history(token:accessTokenOut = Depends(verify_token_rider_role)):
 @router.post(
     "/ride/request",
     response_model_exclude_none=True,
-    dependencies=[Depends(verify_token_rider_role)],
+    dependencies=[Depends(verify_token_rider_role), Depends(check_rider_rating_gate)],
     response_model=APIResponse[RideOut],
     summary="Request a ride",
     description="Creates a new ride request after calculating fare and route details.",
