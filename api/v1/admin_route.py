@@ -934,7 +934,7 @@ async def create_a_ride_for_user(
     
     vehicle = Vehicle[ride_data.vehicleType.value]
     price = calculate_fare_using_vehicle_config_and_distance(
-        distance=map.totalDistanceMeters,
+        distance=map.totalDistanceMeters, # type: ignore
         time=map.totalDurationSeconds,
         vehicle=vehicle,
     )
