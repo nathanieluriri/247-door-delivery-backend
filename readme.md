@@ -55,6 +55,12 @@ Dockerfile              Container build
 - `/api/v1/sse`
 - `/api/v1/chats`
 
+## API Contracts
+- Driver headshot upload + admin approval flow:
+  - [docs/driver_headshot_upload_and_approval.md](docs/driver_headshot_upload_and_approval.md)
+- Reverse geocoding + ride calculation frontend flow:
+  - [docs/reverse_geocoding_ride_calculation_flow.md](docs/reverse_geocoding_ride_calculation_flow.md)
+
 ## Prerequisites
 - Python 3.11+
 - MongoDB

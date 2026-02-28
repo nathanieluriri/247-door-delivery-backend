@@ -683,7 +683,7 @@ async def ingest_background_check_from_provider(
         reference=payload.referenceId,
     )
     await record_audit_event(
-        actor_id=token.get("userId"),
+        actor_id=token.get("userId"), # type: ignore
         actor_type="admin",
         action="background_provider_update",
         target_type="driver",
@@ -1098,7 +1098,7 @@ async def update_admin_password_while_logged_in(rider_details:AdminUpdatePasswor
 
     Access: Admin only (valid admin access token required).
     """
-    driver =  await update_admin_by_id(driver_id=token.get('userId'),rider_details=rider_details,is_password_getting_changed=True)
+    driver =  await update_admin_by_id(driver_id=token.get('userId'),rider_details=rider_details,is_password_getting_changed=True) # type: ignore
     return APIResponse(data = driver,status_code=200,detail="Successfully updated profile")
 
 
