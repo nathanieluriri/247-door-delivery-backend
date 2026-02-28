@@ -38,7 +38,7 @@ async def ensure_ride_membership(user: JWTPayload, ride_id: str) -> None:
 # 1. Send Chat (Create & Broadcast)
 # ------------------------------
 @router.post(
-    "/",
+    "",
     response_model=APIResponse[ChatOut],
     status_code=status.HTTP_201_CREATED,
     summary="Send a chat message",
@@ -70,7 +70,7 @@ async def send_chat_message(
         new_item = await add_chat(new_data,driverId=user.user_id)
     elif user.user_type=="RIDER":
         new_item = await add_chat(new_data,riderId=user.user_id)
-    if not new_item:
+    if not new_item: # type: ignore
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to send message")
     
     return APIResponse(status_code=201, data=new_item, detail="Message sent and broadcasted")
@@ -130,10 +130,10 @@ async def get_message_by_id(rideId: str = Path(..., description="ride ID")):
         raise HTTPException(status_code=404, detail="Message not found")
     events = [
         ChatMessageEvent(
-            chatId=chat.id,
+            chatId=chat.id, # type: ignore
             rideId=chat.rideId,
             senderId=chat.userId or "",
-            senderType=chat.userType,
+            senderType=chat.userType, # type: ignore
             message=chat.text,
             timestamp=chat.date_created or chat.last_updated or 0,
         )
