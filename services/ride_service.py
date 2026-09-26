@@ -668,6 +668,17 @@ async def retrieve_active_ride_for_driver(driver_id: str) -> Optional[RideOut]:
     return await _enrich_ride_with_driver_snapshot(result[0])
 
 
+async def retrieve_active_ride_for_rider(rider_id: str) -> Optional[RideOut]:
+    if not ObjectId.is_valid(rider_id):
+        raise HTTPException(status_code=400, detail="Invalid rider ID format")
+    filter_dict = {
+        "userId": rider_id,
+        "rideStatus": {"$in": [RideStatus.arrivingToPickup, RideStatus.drivingToDestination]},
+    }
+    result = await get_rides(filter_dict, start=0, stop=1)
+    return result[0] if result else None
+
+
 async def retrieve_rides_by_user_id_and_ride_id(user_id: str,ride_id:str) -> RideOut:
     """Retrieves ride object based specific Id 
 

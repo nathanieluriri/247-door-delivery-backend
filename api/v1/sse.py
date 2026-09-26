@@ -8,6 +8,8 @@ from schemas.sse import SSEAck, SSEEventType
 from schemas.tokens_schema import accessTokenOut
 from security.auth import verify_token_driver_role, verify_token_rider_role
 from security.account_status_checks import check_driver_sse_eligibility, get_driver_sse_eligibility_status
+from services.driver_route_service import resend_latest_driver_route
+from services.ride_service import retrieve_active_ride_for_driver, retrieve_active_ride_for_rider
 from services.rider_service import retrieve_rider_by_rider_id
 from services.sse_service import ack_event, stream_events, publish_profile_action_required
 
@@ -41,6 +43,13 @@ async def stream_driver_events(
 
     Access: Driver only (valid driver access token required).
     """
+    try:
+        active_ride = await retrieve_active_ride_for_driver(token.userId)
+        if active_ride:
+            await resend_latest_driver_route(active_ride, driver_id=token.userId)
+    except Exception:
+        pass
+
     allowed_types = [event_type.value for event_type in event_types] if event_types else None
     return StreamingResponse(
         stream_events(
@@ -111,6 +120,13 @@ async def stream_rider_events(
                 cta_label="Add phone number",
                 cta_path="/profile/phone",
             )
+    except Exception:
+        pass
+
+    try:
+        active_ride = await retrieve_active_ride_for_rider(token.userId)
+        if active_ride:
+            await resend_latest_driver_route(active_ride, rider_id=token.userId)
     except Exception:
         pass
 

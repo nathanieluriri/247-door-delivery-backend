@@ -179,6 +179,34 @@ async def _build_route(
     return route, None
 
 
+async def resend_latest_driver_route(
+    ride,
+    rider_id: Optional[str] = None,
+    driver_id: Optional[str] = None,
+) -> None:
+    """Sends the current route again to an app that just (re)connected, which otherwise
+    waits for the driver to move before it can draw anything."""
+    try:
+        status = RideStatus(ride.rideStatus)
+    except ValueError:
+        return
+    if status not in {RideStatus.arrivingToPickup, RideStatus.drivingToDestination}:
+        return
+
+    cached = await _get_cached_route_meta(ride.id, status)
+    if not cached or not cached.get("route"):
+        await maybe_publish_driver_route_for_ride(ride, status, force=True)
+        return
+
+    await publish_driver_route_update(
+        ride_id=ride.id,
+        status=status,
+        rider_id=rider_id,
+        driver_id=driver_id,
+        route=DeliveryRouteResponse(**cached["route"]),
+    )
+
+
 async def maybe_publish_driver_route_for_ride(
     ride,
     status: RideStatus,
