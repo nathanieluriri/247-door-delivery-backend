@@ -566,6 +566,7 @@ async def publish_ride_status_update(
     action_deadline_ms: Optional[int] = None,
     reason_code: Optional[str] = None,
     rating_status: Optional[RideRatingStatus] = None,
+    payment_link: Optional[str] = None,
 ) -> None:
     status_value = status.value if hasattr(status, "value") else str(status)
     base_payload = RideStatusUpdate(
@@ -581,18 +582,19 @@ async def publish_ride_status_update(
         ratingStatus=rating_status,
     )
     if rider_id:
-        rider_payload = base_payload
+        # Only the rider pays, so only the rider's copy carries the payment link.
+        rider_payload = base_payload.model_copy(update={"payment_link": payment_link}) if payment_link else base_payload
         if driver_id:
             try:
                 snapshot_data = await build_driver_sse_snapshot(driver_id)
                 if snapshot_data:
-                    rider_payload = base_payload.model_copy(
+                    rider_payload = rider_payload.model_copy(
                         update={
                             "driver_snapshot": DriverSnapshot(**snapshot_data),
                         }
                     )
             except Exception:
-                rider_payload = base_payload
+                pass
         await publish_event("rider", rider_id, "ride_status_update", rider_payload)
         _schedule_notification(
             "rider",
@@ -789,6 +791,7 @@ async def publish_ride_request(
     fare_estimate: Optional[float],
     rider_id: Optional[str],
     pickup_location: Optional[tuple[float, float]] = None,
+    details: Optional[dict] = None,
 ) -> int:
     payload = RideRequestEvent(
         rideId=ride_id,
@@ -797,6 +800,7 @@ async def publish_ride_request(
         vehicleType=vehicle_type,
         fareEstimate=fare_estimate,
         riderId=rider_id,
+        **(details or {}),
     )
     return await publish_ride_request_to_drivers(payload, pickup_location=pickup_location)
 

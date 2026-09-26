@@ -35,7 +35,7 @@ class PaymentService:
 
     @staticmethod
     def _ride_price_to_minor(price: float) -> int:
-        return int(round(price / 10))
+        return int(round(price * 100))
 
     @staticmethod
     def _extract_reference(payload: dict[str, Any]) -> str | None:
@@ -284,8 +284,11 @@ class PaymentService:
             elif ride.rideStatus in {RideStatus.pendingPayment, RideStatus.findingDriver}:
                 update_fields["rideStatus"] = RideStatus.matching
         elif tx.status == PaymentStatus.FAILED:
+            # A failure reported after the ride was paid for and completed must not undo it.
+            if ride.rideStatus == RideStatus.completed and ride.paymentStatus:
+                return
             update_fields["paymentStatus"] = False
-            if ride.rideStatus in {RideStatus.awaitingPayment, RideStatus.completed}:
+            if ride.rideStatus == RideStatus.awaitingPayment:
                 update_fields["rideStatus"] = RideStatus.paymentFailed
         elif tx.status == PaymentStatus.REFUNDED:
             update_fields["paymentStatus"] = False
@@ -337,6 +340,11 @@ class PaymentService:
             {"_id": ObjectId(ride_id)} if ObjectId.is_valid(ride_id) else {"_id": ride_id},
             ride_update,
         )
+
+        if updated.rideStatus == RideStatus.completed and ride.rideStatus != RideStatus.completed:
+            from services.ride_service import _maybe_create_payout_for_completed_ride
+
+            await _maybe_create_payout_for_completed_ride(updated)
 
         if updated.rideStatus is not None and updated.rideStatus != ride.rideStatus:
             try:

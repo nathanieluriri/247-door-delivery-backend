@@ -7,9 +7,10 @@ from typing import Literal
 
 
 ALLOWED_COUNTRIES = Literal[
+    "gb", # United Kingdom, first so clients without a matching locale default to it
+    "uk", # United Kingdom (Google accepts 'uk' but 'gb' is the strict ISO standard)
     "us", # United States
     "ng", # Nigeria
-    "uk", # United Kingdom (Google accepts 'uk' but 'gb' is the strict ISO standard)
     "ca", # Canada
     "de", # Germany
     "fr", # France

@@ -94,7 +94,6 @@ async def retrieve_chat_by_chat_id(id: str) -> List[ChatOut]:
     """Retrieves chat object based specific Id 
 
     Raises:
-        HTTPException 404(not found): if  Chat not found in the db
         HTTPException 400(bad request): if  Invalid chat ID format
 
     Returns:
@@ -104,13 +103,8 @@ async def retrieve_chat_by_chat_id(id: str) -> List[ChatOut]:
         raise HTTPException(status_code=400, detail="Invalid chat ID format")
 
     filter_dict = {"rideId": id}
-    
-    result = await get_chats(filter_dict,start=0,stop=1000)
 
-    if not result:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    return result
+    return await get_chats(filter_dict,start=0,stop=1000)
 
 
 async def retrieve_chats(start=0,stop=100) -> List[ChatOut]:

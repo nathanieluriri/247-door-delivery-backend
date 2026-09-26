@@ -381,7 +381,7 @@ async def publish_ride_request_test():
         "vehicleType": "CAR",
         "pickupSchedule": 1770393207214,
         "paymentStatus": True,
-        "price": 8506.4,
+        "price": 8.51,
         "rideStatus": "findingDriver",
         "userId": "694573edfb42ab4e70634aec",
         "checkoutSessionObject": {
@@ -714,7 +714,7 @@ async def test_sse_broadcast(pickup_lat: float, pickup_lon: float):
         pickup=f"{pickup_lat},{pickup_lon}",
         destination="9.0706,7.4675",
         vehicle_type="CAR",
-        fare_estimate=123445,
+        fare_estimate=12.35,
         rider_id=None,
         pickup_location=(pickup_lat, pickup_lon),
     )

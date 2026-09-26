@@ -426,7 +426,11 @@ async def update_driver_vehicle(driver_id: str, vehicle_details: DriverVehicleUp
         vehicleVerifiedAt=None,
         vehicleVerificationNotes=None,
     )
-    result = await update_driver(filter_dict, update_payload)
+    result = await update_driver(
+        filter_dict,
+        update_payload,
+        clear_fields=("vehicleVerifiedAt", "vehicleVerificationNotes"),
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Driver not found or update failed")
     return result

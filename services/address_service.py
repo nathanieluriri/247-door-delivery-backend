@@ -18,6 +18,16 @@ from repositories.address import (
     delete_address,
 )
 from schemas.address import AddressCreate, AddressUpdate, AddressOut
+from services.place_service import get_place_details
+
+
+async def _place_summary(place_id: str) -> dict:
+    """The place's name and address, from the place-details cache when it has them."""
+    try:
+        details = (await get_place_details(place_id=place_id)).data or {}
+    except Exception:
+        return {}
+    return {"name": details.get("name"), "formattedAddress": details.get("address")}
 
 
 async def add_address(address_data: AddressCreate) -> AddressOut:
@@ -26,6 +36,9 @@ async def add_address(address_data: AddressCreate) -> AddressOut:
     Returns:
         _type_: AddressOut
     """
+    if not address_data.formattedAddress:
+        summary = await _place_summary(address_data.placeId)
+        address_data = address_data.model_copy(update={k: v for k, v in summary.items() if v})
     return await create_address(address_data)
 
 
@@ -91,6 +104,12 @@ async def retrieve_address_by_user_id(userId: str) -> List[AddressOut]:
     if not result:
         return []
 
+    # Places saved before names were stored only have their id: fill in what riders can read.
+    for address in result:
+        if not address.formattedAddress:
+            summary = await _place_summary(address.placeId)
+            address.name = address.name or summary.get("name")
+            address.formattedAddress = summary.get("formattedAddress")
     return result
 
 

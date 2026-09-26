@@ -60,6 +60,7 @@ from schemas.imports import *
 from security.auth import verify_token,verify_token_to_refresh,verify_admin_token
 from services.driver_service import retrieve_driver_by_driver_id, retrieve_drivers
 from services.rider_service import retrieve_rider_by_rider_id, retrieve_riders
+from services.account_stats import attach_account_stats
 from fastapi.routing import APIRoute
 
  
@@ -293,6 +294,8 @@ async def delete_admin_account(
 @router.patch(
     "/profile",
     dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+    response_model_exclude={"data": {"password"}},
+    response_model=APIResponse[AdminOut],
     summary="Update admin profile",
     description="Updates the authenticated admin profile fields.",
 )
@@ -389,7 +392,7 @@ async def list_of_drivers(start:int= 0, stop:int=100,token:accessTokenOut = Depe
 
     Access: Admin only (valid admin access token required).
     """
-    items = await retrieve_drivers(start=start,stop=stop)
+    items = await attach_account_stats(await retrieve_drivers(start=start,stop=stop), "driverId")
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 @router.get(
@@ -738,7 +741,7 @@ async def list_riders(start:int= 0, stop:int=100,token:accessTokenOut = Depends(
 
     Access: Admin only (valid admin access token required).
     """
-    items = await retrieve_riders(start=0,stop=100)
+    items = await attach_account_stats(await retrieve_riders(start=start,stop=stop), "userId")
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 
@@ -913,8 +916,10 @@ async def create_a_ride_for_user(
 
     Access: Admin only (valid admin access token required).
     """
-    pick_up = await get_place_details(place_id=ride_data.pickup.place_id)
-    drop_off = await get_place_details(place_id=ride_data.destination.place_id)
+    # RideBase allows a place as either a RidePlace or a bare place id.
+    place_id_of = lambda place: place if isinstance(place, str) else place.place_id
+    pick_up = await get_place_details(place_id=place_id_of(ride_data.pickup))
+    drop_off = await get_place_details(place_id=place_id_of(ride_data.destination))
     if pick_up.data==None or drop_off.data==None:
         raise HTTPException(status_code=500, detail="pickup or dropoff details fetching failed")
     origin = (pick_up.data["lat"],pick_up.data["lng"])
@@ -975,7 +980,7 @@ async def get_rides_for_a_particular_rider(
 
 
 @router.get(
-    "/ride/{driverId}",
+    "/ride/driver/{driverId}",
     dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
     response_model_exclude_none=True,
     response_model_exclude={"data": {"password"}},

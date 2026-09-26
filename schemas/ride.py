@@ -150,6 +150,7 @@ class RideOut(RideBase):
     driverHeadshotDocumentId: Optional[str] = None
     driverRating: Optional[float] = None
     driverRatingCount: Optional[int] = None
+    riderName: Optional[str] = None
     userId:str
     invoiceData:Optional[InvoiceData]=None
     checkoutSessionObject:Optional[CheckoutSessionObject]=None

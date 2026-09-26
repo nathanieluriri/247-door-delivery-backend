@@ -27,6 +27,8 @@ from services.driver_snapshot_service import (
     resolve_driver_headshot_url,
 )
 from repositories.payout import get_payouts
+from repositories.rating import get_user_rating_summary
+from repositories.rider_repo import get_rider
 from core.redis_cache import async_redis
 from core.metrics import match_time_seconds, driver_acceptance_rate, driver_rejects
 from repositories.ride import (
@@ -120,6 +122,69 @@ def _format_place_for_dispatch(place: Any) -> str:
     )
 
 
+
+def _place_name(place: Any) -> Optional[str]:
+    if isinstance(place, dict):
+        return place.get("name")
+    return getattr(place, "name", None)
+
+
+def _place_coordinates(place: Any) -> tuple[Optional[float], Optional[float]]:
+    if isinstance(place, dict):
+        return place.get("latitude"), place.get("longitude")
+    return getattr(place, "latitude", None), getattr(place, "longitude", None)
+
+
+async def rider_display_name(rider_id: str) -> Optional[str]:
+    """First name and last initial, which is all a driver is shown of a rider."""
+    if not ObjectId.is_valid(rider_id):
+        return None
+    rider = await get_rider({"_id": ObjectId(rider_id)})
+    if not rider:
+        return None
+    first, last = (rider.firstName or "").strip(), (rider.lastName or "").strip()
+    return f"{first} {last[:1]}." if first and last else (first or None)
+
+
+async def _ride_request_details(ride: RideOut) -> dict:
+    """What a driver needs to judge an offer: who is riding, where exactly, how far and how long."""
+    details: dict[str, Any] = {}
+    if ride.origin:
+        details.update(pickupLatitude=ride.origin.latitude, pickupLongitude=ride.origin.longitude)
+    else:
+        lat, lng = _place_coordinates(ride.pickup)
+        details.update(pickupLatitude=lat, pickupLongitude=lng)
+    lat, lng = _place_coordinates(ride.destination)
+    details.update(destinationLatitude=lat, destinationLongitude=lng)
+    details.update(pickupName=_place_name(ride.pickup), destinationName=_place_name(ride.destination))
+    if ride.map:
+        details.update(
+            distanceMeters=ride.map.totalDistanceMeters,
+            durationSeconds=ride.map.totalDurationSeconds,
+            encodedPolyline=ride.map.encodedPolyline,
+        )
+    try:
+        details["riderName"] = await rider_display_name(ride.userId)
+        summary = await get_user_rating_summary(ride.userId)
+        if summary.totalRides:
+            details.update(riderRating=round(summary.avgRating, 2), riderRatingCount=summary.totalRides)
+    except Exception:
+        pass
+    return {key: value for key, value in details.items() if value is not None}
+
+
+async def _publish_ride_request_for(ride: RideOut) -> None:
+    await publish_ride_request(
+        ride_id=ride.id,  # type: ignore
+        pickup=_format_place_for_dispatch(ride.pickup),
+        destination=_format_place_for_dispatch(ride.destination),
+        vehicle_type=getattr(ride.vehicleType, "value", str(ride.vehicleType)),
+        fare_estimate=ride.price,
+        rider_id=ride.userId,
+        pickup_location=(ride.origin.latitude, ride.origin.longitude) if ride.origin else None,
+        details=await _ride_request_details(ride),
+    )
+
 async def _attach_driver_snapshot_to_ride_update(
     ride_data: RideUpdate,
     fallback_driver_id: Optional[str] = None,
@@ -201,7 +266,7 @@ async def _maybe_create_payout_for_completed_ride(ride: RideOut) -> None:
             return
         payout_record = PayoutCreate(
             payoutOption=PayoutOptions.totalEarnings,
-            amount=float(ride.price),
+            amount=int(round(float(ride.price) * 100)),
             driverId=ride.driverId,
             rideIds=[ride.id],
         )
@@ -245,18 +310,7 @@ async def republish_ride_request_until_accepted(ride_id: str) -> None:
         _clear_instant_matching_jobs(ride_id)
         return
 
-    pickup_location = None
-    if ride.origin:
-        pickup_location = (ride.origin.latitude, ride.origin.longitude)
-    await publish_ride_request(
-        ride_id=ride.id, # type: ignore
-        pickup=_format_place_for_dispatch(ride.pickup),
-        destination=_format_place_for_dispatch(ride.destination),
-        vehicle_type=str(ride.vehicleType),
-        fare_estimate=ride.price,
-        rider_id=ride.userId,
-        pickup_location=pickup_location,
-    )
+    await _publish_ride_request_for(ride)
 
 
 def _schedule_dispatch_republish_job(ride_id: str) -> None:
@@ -305,18 +359,7 @@ async def activate_scheduled_ride_for_matching(ride_id: str) -> None:
     ride = await update_ride({"_id": ObjectId(ride_id)}, update_payload)
 
     try:
-        pickup_location = None
-        if ride.origin:
-            pickup_location = (ride.origin.latitude, ride.origin.longitude)
-        await publish_ride_request(
-            ride_id=ride.id,  # type: ignore
-            pickup=_format_place_for_dispatch(ride.pickup),
-            destination=_format_place_for_dispatch(ride.destination),
-            vehicle_type=str(ride.vehicleType),
-            fare_estimate=ride.price,
-            rider_id=ride.userId,
-            pickup_location=pickup_location,
-        )
+        await _publish_ride_request_for(ride)
         _schedule_dispatch_republish_job(ride_id)
         await publish_ride_status_update(
             ride_id=ride_id,
@@ -486,18 +529,7 @@ async def _dispatch_or_schedule_ride(ride: RideOut) -> None:
     if ride.rideStatus != RideStatus.matching:
         return
 
-    pickup_location = None
-    if ride.origin:
-        pickup_location = (ride.origin.latitude, ride.origin.longitude)
-    await publish_ride_request(
-        ride_id=ride.id,  # type: ignore
-        pickup=_format_place_for_dispatch(ride.pickup),
-        destination=_format_place_for_dispatch(ride.destination),
-        vehicle_type=str(ride.vehicleType),
-        fare_estimate=ride.price,
-        rider_id=ride.userId,
-        pickup_location=pickup_location,
-    )
+    await _publish_ride_request_for(ride)
     _schedule_dispatch_republish_job(ride.id)
     _schedule_instant_matching_timeout_job(ride)
 
@@ -636,9 +668,8 @@ async def retrieve_rides_by_driver_id(driver_id: str) -> List[RideOut]:
 
     filter_dict = {"driverId": driver_id}
     result = await get_rides(filter_dict)
-
     if not result:
-        raise HTTPException(status_code=404, detail="Ride not found")
+        return []
 
     return await _enrich_rides_with_driver_snapshot(result)
 
@@ -654,6 +685,17 @@ async def retrieve_active_ride_for_driver(driver_id: str) -> Optional[RideOut]:
     if not result:
         return None
     return await _enrich_ride_with_driver_snapshot(result[0])
+
+
+async def retrieve_active_ride_for_rider(rider_id: str) -> Optional[RideOut]:
+    if not ObjectId.is_valid(rider_id):
+        raise HTTPException(status_code=400, detail="Invalid rider ID format")
+    filter_dict = {
+        "userId": rider_id,
+        "rideStatus": {"$in": [RideStatus.arrivingToPickup, RideStatus.drivingToDestination]},
+    }
+    result = await get_rides(filter_dict, start=0, stop=1)
+    return result[0] if result else None
 
 
 async def retrieve_rides_by_user_id_and_ride_id(user_id: str,ride_id:str) -> RideOut:
@@ -936,7 +978,7 @@ async def update_ride_by_id(
                             detail="Ride price is missing for refund",
                         )
 
-                    unit_amount = int(ride.price / 10)
+                    unit_amount = int(round(ride.price * 100))
                     refund_amount = int(
                         Decimal(unit_amount) * Decimal(str(refund_percentage))
                     )
@@ -1006,6 +1048,7 @@ async def update_ride_by_id(
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
                 rating_status=result.ratingStatus,
+                payment_link=result.paymentLink if ride_data.rideStatus == RideStatus.awaitingPayment else None,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
@@ -1084,7 +1127,7 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
                 payment_service = get_payment_service()
                 if ride.price is None:
                     raise HTTPException(status_code=400, detail="Ride price is missing for refund")
-                unit_amount = int(ride.price / 10)
+                unit_amount = int(round(ride.price * 100))
                 if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
                     raise HTTPException(status_code=400, detail="Missing payment intent for refund")
                 refund_amount = int(Decimal(unit_amount) * Decimal("0.95"))
@@ -1136,6 +1179,7 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
                 rating_status=result.ratingStatus,
+                payment_link=result.paymentLink if ride_data.rideStatus == RideStatus.awaitingPayment else None,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")

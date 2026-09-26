@@ -25,6 +25,14 @@ from schemas.stripe_event import StripeEventCreate
 from security.oauth_return import resolve_return_url_or_raise
 from services.stripe_event_service import retrieve_stripe_event_by_stripe_event_id
 
+
+def _status_after_onboarding(current_status: Optional[AccountStatus], is_complete: bool) -> Optional[AccountStatus]:
+    """Finishing payout onboarding activates a driver who is waiting for verification, but never
+    one an admin has suspended, banned or deactivated; None leaves the status as it is."""
+    if is_complete and current_status == AccountStatus.PENDING_VERIFICATION:
+        return AccountStatus.ACTIVE
+    return None
+
 # Environment variables for Stripe Connect
 STRIPE_CONNECT_WEBHOOK_SECRET = os.environ.get("STRIPE_CONNECT_WEBHOOK_SECRET")
 STRIPE_PLATFORM_FEE_PERCENT = float(os.getenv("STRIPE_PLATFORM_FEE_PERCENT", "0.1"))  # 10% platform fee
@@ -399,6 +407,9 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
                 and account_data.get("payouts_enabled") is True
                 and (not currently_due)
             )
+            from repositories.driver import get_driver
+
+            owner = await get_driver({"stripeAccountId": account_id})
             driver_update = DriverUpdate(
                 stripeAccountId=account_id,
                 payoutsEnabled=account_data.get("payouts_enabled", False),
@@ -407,7 +418,7 @@ class StripeStaffPaymentProvider(StaffPaymentProvider):
                 requirementsCurrentlyDue=currently_due,
                 requirementsEventuallyDue=requirements.get("eventually_due"),
                 requirementsPendingVerification=requirements.get("pending_verification"),
-                accountStatus=AccountStatus.ACTIVE if is_onboarding_complete else None,
+                accountStatus=_status_after_onboarding(owner.accountStatus if owner else None, is_onboarding_complete),
             )
 
             # Find driver by stripe account ID and update
@@ -697,7 +708,7 @@ class StaffPaymentService:
                 requirementsPendingVerification=requirements.get("pending_verification"),
                 onboardingRefreshUrl=onboarding_url,
                 onboardingReturnUrl=resolved_return_url,
-                accountStatus=AccountStatus.ACTIVE if is_onboarding_complete else None,
+                accountStatus=_status_after_onboarding(driver.accountStatus, is_onboarding_complete),
             )
             from services.driver_service import update_driver_by_id
 
@@ -743,7 +754,7 @@ class StaffPaymentService:
             requirementsPendingVerification=requirements.get("pending_verification"),
             onboardingRefreshUrl=onboarding_refresh_url,
             onboardingReturnUrl=onboarding_return_url,
-            accountStatus=AccountStatus.ACTIVE if is_onboarding_complete else None,
+            accountStatus=_status_after_onboarding(driver.accountStatus, is_onboarding_complete),
         )
         from services.driver_service import update_driver_by_id
 
@@ -935,7 +946,7 @@ class StaffPaymentService:
             requirementsEventuallyDue=requirements.get("eventually_due"),
             requirementsPendingVerification=requirements.get("pending_verification"),
             onboardingReturnUrl=resolved_return_url,
-            accountStatus=AccountStatus.ACTIVE,
+            accountStatus=_status_after_onboarding(driver.accountStatus, True),
         )
         from services.driver_service import update_driver_by_id
 

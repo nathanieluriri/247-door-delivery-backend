@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path
 from typing import List, Optional
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
+from schemas.imports import AccountStatus, PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
 from core.staff_payment import StaffPaymentService, get_staff_payment_service
@@ -34,6 +34,7 @@ from services.payout_service import (
 
 from schemas.driver import (
     DriverCreate,
+    DriverSignup,
     DriverOut,
     DriverBase,
     DriverUpdate,
@@ -79,7 +80,7 @@ from core.antivirus import scan_bytes
 from security.auth import verify_token_to_refresh, verify_token_driver_role
 from security.encrypting_jwt import decode_jwt_token
 from services.rating_service import add_rating, retrieve_rating_by_user_id
-from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
+from services.ride_service import rider_display_name, retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
 from services.sse_service import publish_ride_request
 from services.notification_targets import register_push_token, has_push_tokens
 from schemas.notification import PushTokenRegister
@@ -332,14 +333,14 @@ async def get_driver_details(token:accessTokenOut = Depends(verify_token_driver_
     summary="Register driver",
     description="Creates a new driver account using email and password.",
 )
-async def signup_new_driver(user_data:DriverCreate):
+async def signup_new_driver(user_data:DriverSignup):
     """
     Register a new driver account.
 
     Access: Public (no auth).
     """
-    if len(user_data.password)<8:
-        raise HTTPException(status_code=401,detail="Password too short")
+    # A new driver always waits for document review and admin approval.
+    user_data.accountStatus = AccountStatus.PENDING_VERIFICATION
     items = await add_driver(driver_data=user_data)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
@@ -951,13 +952,15 @@ async def retrieve_ride_details(
     Access: Driver only (valid driver access token required).
     """
     ride = await retrieve_ride_by_ride_id(id=ride_id)
-    
-    if not ride:
+
+    # Only the ride's own driver may read it; anyone else gets the same answer as for a missing ride.
+    if not ride or ride.driverId != token.userId:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ride not found"
         )
-    
+    ride.riderName = await rider_display_name(ride.userId)
+
     return APIResponse(
         status_code=200,
         data=ride,
@@ -1287,36 +1290,6 @@ async def list_previous_payouts(
 # Retrieve a single Payout
 # ------------------------------
 @router.get(
-    "/payout/{id}",
-    response_model=APIResponse[PayoutOut],
-    summary="Get payout by ID",
-    description="Fetches a single payout record by its ID.",
-)
-async def view_information_regarding_a_previous_payout(
-    
-    id: str = Path(..., description="payout ID to fetch specific item"),
-    
-    token:accessTokenOut = Depends(verify_token_driver_role)
-    
-):
-    """
-    Retrieves a single Payout by its ID.
-
-    Access: Driver only (valid driver access token required).
-    """
-    item = await retrieve_payout_by_payout_id(id=id,driverId=token.userId)
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
-    
-    return APIResponse(status_code=200, data=item, detail="payout item fetched")
-
-
-
- 
-
-
-
-@router.get(
     "/payout/balance",
     response_model=APIResponse[PayoutBalanceOut],
     summary="Get payout balance",
@@ -1354,6 +1327,36 @@ async def get_driver_available_balance(token: accessTokenOut = Depends(verify_to
 # ------------------------------
 # Request Payout (Transfer to provider balance)
 # ------------------------------
+@router.get(
+    "/payout/{id}",
+    response_model=APIResponse[PayoutOut],
+    summary="Get payout by ID",
+    description="Fetches a single payout record by its ID.",
+)
+async def view_information_regarding_a_previous_payout(
+    
+    id: str = Path(..., description="payout ID to fetch specific item"),
+    
+    token:accessTokenOut = Depends(verify_token_driver_role)
+    
+):
+    """
+    Retrieves a single Payout by its ID.
+
+    Access: Driver only (valid driver access token required).
+    """
+    item = await retrieve_payout_by_payout_id(id=id,driverId=token.userId)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
+    
+    return APIResponse(status_code=200, data=item, detail="payout item fetched")
+
+
+
+ 
+
+
+
 @router.post(
     "/payout/request",
     response_model=APIResponse[PayoutOut],

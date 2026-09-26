@@ -19,6 +19,9 @@ from services.chat_service import (
     retrieve_chat_by_chat_id,
     update_chat_by_id,
 )
+from bson import ObjectId
+
+from repositories.chat import get_chat
 from services.ride_service import retrieve_ride_by_ride_id
 # Assuming you have your redis instance and auth dependencies
 from security.auth import verify_token
@@ -119,15 +122,17 @@ async def stream_chat_updates(
     summary="Get chat history for a ride",
     description="Returns stored chat messages associated with a ride.",
 )
-async def get_message_by_id(rideId: str = Path(..., description="ride ID")):
+async def get_message_by_id(
+    rideId: str = Path(..., description="ride ID"),
+    user: JWTPayload = Depends(verify_token),
+):
     """
     Fetch stored chat messages for a ride ID.
 
-    Access: Public (no auth enforced).
+    Access: the ride's rider or its assigned driver.
     """
+    await ensure_ride_membership(user, rideId)
     item = await retrieve_chat_by_chat_id(id=rideId)
-    if not item:
-        raise HTTPException(status_code=404, detail="Message not found")
     events = [
         ChatMessageEvent(
             chatId=chat.id, # type: ignore
@@ -152,12 +157,19 @@ async def get_message_by_id(rideId: str = Path(..., description="ride ID")):
     summary="Delete a chat message",
     description="Deletes a chat message by its identifier.",
 )
-async def delete_message(id: str = Path(...)):
+async def delete_message(id: str = Path(...), user: JWTPayload = Depends(verify_token)):
     """
     Delete a single chat message by its ID.
 
-    Access: Public (no auth enforced).
+    Access: the message's sender only.
     """
+    if not ObjectId.is_valid(id):
+        raise HTTPException(status_code=400, detail="Invalid chat ID format")
+    chat = await get_chat({"_id": ObjectId(id)})
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Message not found or deletion failed")
+    if chat.userId != user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the sender can delete a message")
     deleted = await remove_chat(id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Message not found or deletion failed")
