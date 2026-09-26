@@ -334,6 +334,9 @@ async def login_rider(user_data:RiderBase):
 
     Access: Public (no auth).
     """
+    # Google sign-in finishes in the OAuth callback, after Google has vouched for the email.
+    # Here the password is always checked, whatever loginType the client sends.
+    user_data = user_data.model_copy(update={"loginType": LoginType.password})
     items = await authenticate_rider(user_data=user_data)
    
      
