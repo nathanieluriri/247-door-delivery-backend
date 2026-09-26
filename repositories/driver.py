@@ -65,13 +65,16 @@ async def get_drivers(filter_dict: Optional[dict] = None,start=0,stop=100) -> Li
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while fetching drivers: {str(e)}"
         )
-async def update_driver(filter_dict: dict, driver_data: DriverUpdate) -> DriverOut:
+async def update_driver(filter_dict: dict, driver_data: DriverUpdate, clear_fields: tuple[str, ...] = ()) -> DriverOut:
     if not filter_dict:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Driver filter is required."
         )
+    # None values are dropped so partial updates keep what is stored; clear_fields names the
+    # fields that must really be reset to null.
     update_doc = driver_data.model_dump(exclude_none=True)
+    update_doc.update({field: None for field in clear_fields})
     if not update_doc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

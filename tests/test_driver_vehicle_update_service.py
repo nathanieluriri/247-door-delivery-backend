@@ -11,9 +11,12 @@ from services import driver_service
 async def test_update_driver_vehicle_persists_vehicle_fields(monkeypatch):
     captured: dict = {}
 
-    async def fake_update_driver(filter_dict: dict, driver_data):
+    async def fake_update_driver(filter_dict: dict, driver_data, clear_fields=()):
         captured["filter_dict"] = filter_dict
-        captured["payload"] = driver_data.model_dump(exclude_none=True)
+        captured["payload"] = {
+            **driver_data.model_dump(exclude_none=True),
+            **{field: None for field in clear_fields},
+        }
         return SimpleNamespace(id="69a02b3e5b7284be8bd80afa")
 
     monkeypatch.setattr(driver_service, "update_driver", fake_update_driver)
