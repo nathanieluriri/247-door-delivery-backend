@@ -82,6 +82,15 @@ class RideRequestEvent(BaseModel):
     vehicle_type: str = Field(..., alias="vehicleType")
     fare_estimate: Optional[float] = Field(default=None, alias="fareEstimate")
     rider_id: Optional[str] = Field(default=None, alias="riderId")
+    rider_name: Optional[str] = Field(default=None, alias="riderName")
+    rider_rating: Optional[float] = Field(default=None, alias="riderRating")
+    rider_rating_count: Optional[int] = Field(default=None, alias="riderRatingCount")
+    pickup_latitude: Optional[float] = Field(default=None, alias="pickupLatitude")
+    pickup_longitude: Optional[float] = Field(default=None, alias="pickupLongitude")
+    destination_latitude: Optional[float] = Field(default=None, alias="destinationLatitude")
+    destination_longitude: Optional[float] = Field(default=None, alias="destinationLongitude")
+    distance_meters: Optional[int] = Field(default=None, alias="distanceMeters")
+    duration_seconds: Optional[int] = Field(default=None, alias="durationSeconds")
 
     model_config = {"populate_by_name": True}
 

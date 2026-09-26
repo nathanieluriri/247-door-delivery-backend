@@ -789,6 +789,7 @@ async def publish_ride_request(
     fare_estimate: Optional[float],
     rider_id: Optional[str],
     pickup_location: Optional[tuple[float, float]] = None,
+    details: Optional[dict] = None,
 ) -> int:
     payload = RideRequestEvent(
         rideId=ride_id,
@@ -797,6 +798,7 @@ async def publish_ride_request(
         vehicleType=vehicle_type,
         fareEstimate=fare_estimate,
         riderId=rider_id,
+        **(details or {}),
     )
     return await publish_ride_request_to_drivers(payload, pickup_location=pickup_location)
 

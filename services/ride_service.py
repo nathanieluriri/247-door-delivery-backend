@@ -27,6 +27,8 @@ from services.driver_snapshot_service import (
     resolve_driver_headshot_url,
 )
 from repositories.payout import get_payouts
+from repositories.rating import get_user_rating_summary
+from repositories.rider_repo import get_rider
 from core.redis_cache import async_redis
 from core.metrics import match_time_seconds, driver_acceptance_rate, driver_rejects
 from repositories.ride import (
@@ -119,6 +121,50 @@ def _format_place_for_dispatch(place: Any) -> str:
         or "Unknown location"
     )
 
+
+
+def _place_coordinates(place: Any) -> tuple[Optional[float], Optional[float]]:
+    if isinstance(place, dict):
+        return place.get("latitude"), place.get("longitude")
+    return getattr(place, "latitude", None), getattr(place, "longitude", None)
+
+
+async def _ride_request_details(ride: RideOut) -> dict:
+    """What a driver needs to judge an offer: who is riding, where exactly, how far and how long."""
+    details: dict[str, Any] = {}
+    if ride.origin:
+        details.update(pickupLatitude=ride.origin.latitude, pickupLongitude=ride.origin.longitude)
+    else:
+        lat, lng = _place_coordinates(ride.pickup)
+        details.update(pickupLatitude=lat, pickupLongitude=lng)
+    lat, lng = _place_coordinates(ride.destination)
+    details.update(destinationLatitude=lat, destinationLongitude=lng)
+    if ride.map:
+        details.update(distanceMeters=ride.map.totalDistanceMeters, durationSeconds=ride.map.totalDurationSeconds)
+    try:
+        rider = await get_rider({"_id": ObjectId(ride.userId)})
+        if rider:
+            first, last = (rider.firstName or "").strip(), (rider.lastName or "").strip()
+            details["riderName"] = f"{first} {last[:1]}." if first and last else (first or None)
+        summary = await get_user_rating_summary(ride.userId)
+        if summary.totalRides:
+            details.update(riderRating=round(summary.avgRating, 2), riderRatingCount=summary.totalRides)
+    except Exception:
+        pass
+    return {key: value for key, value in details.items() if value is not None}
+
+
+async def _publish_ride_request_for(ride: RideOut) -> None:
+    await publish_ride_request(
+        ride_id=ride.id,  # type: ignore
+        pickup=_format_place_for_dispatch(ride.pickup),
+        destination=_format_place_for_dispatch(ride.destination),
+        vehicle_type=getattr(ride.vehicleType, "value", str(ride.vehicleType)),
+        fare_estimate=ride.price,
+        rider_id=ride.userId,
+        pickup_location=(ride.origin.latitude, ride.origin.longitude) if ride.origin else None,
+        details=await _ride_request_details(ride),
+    )
 
 async def _attach_driver_snapshot_to_ride_update(
     ride_data: RideUpdate,
@@ -245,18 +291,7 @@ async def republish_ride_request_until_accepted(ride_id: str) -> None:
         _clear_instant_matching_jobs(ride_id)
         return
 
-    pickup_location = None
-    if ride.origin:
-        pickup_location = (ride.origin.latitude, ride.origin.longitude)
-    await publish_ride_request(
-        ride_id=ride.id, # type: ignore
-        pickup=_format_place_for_dispatch(ride.pickup),
-        destination=_format_place_for_dispatch(ride.destination),
-        vehicle_type=str(ride.vehicleType),
-        fare_estimate=ride.price,
-        rider_id=ride.userId,
-        pickup_location=pickup_location,
-    )
+    await _publish_ride_request_for(ride)
 
 
 def _schedule_dispatch_republish_job(ride_id: str) -> None:
@@ -305,18 +340,7 @@ async def activate_scheduled_ride_for_matching(ride_id: str) -> None:
     ride = await update_ride({"_id": ObjectId(ride_id)}, update_payload)
 
     try:
-        pickup_location = None
-        if ride.origin:
-            pickup_location = (ride.origin.latitude, ride.origin.longitude)
-        await publish_ride_request(
-            ride_id=ride.id,  # type: ignore
-            pickup=_format_place_for_dispatch(ride.pickup),
-            destination=_format_place_for_dispatch(ride.destination),
-            vehicle_type=str(ride.vehicleType),
-            fare_estimate=ride.price,
-            rider_id=ride.userId,
-            pickup_location=pickup_location,
-        )
+        await _publish_ride_request_for(ride)
         _schedule_dispatch_republish_job(ride_id)
         await publish_ride_status_update(
             ride_id=ride_id,
@@ -486,18 +510,7 @@ async def _dispatch_or_schedule_ride(ride: RideOut) -> None:
     if ride.rideStatus != RideStatus.matching:
         return
 
-    pickup_location = None
-    if ride.origin:
-        pickup_location = (ride.origin.latitude, ride.origin.longitude)
-    await publish_ride_request(
-        ride_id=ride.id,  # type: ignore
-        pickup=_format_place_for_dispatch(ride.pickup),
-        destination=_format_place_for_dispatch(ride.destination),
-        vehicle_type=str(ride.vehicleType),
-        fare_estimate=ride.price,
-        rider_id=ride.userId,
-        pickup_location=pickup_location,
-    )
+    await _publish_ride_request_for(ride)
     _schedule_dispatch_republish_job(ride.id)
     _schedule_instant_matching_timeout_job(ride)
 
