@@ -133,8 +133,6 @@ async def get_message_by_id(
     """
     await ensure_ride_membership(user, rideId)
     item = await retrieve_chat_by_chat_id(id=rideId)
-    if not item:
-        raise HTTPException(status_code=404, detail="Message not found")
     events = [
         ChatMessageEvent(
             chatId=chat.id, # type: ignore
