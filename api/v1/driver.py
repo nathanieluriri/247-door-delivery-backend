@@ -80,7 +80,7 @@ from core.antivirus import scan_bytes
 from security.auth import verify_token_to_refresh, verify_token_driver_role
 from security.encrypting_jwt import decode_jwt_token
 from services.rating_service import add_rating, retrieve_rating_by_user_id
-from services.ride_service import retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
+from services.ride_service import rider_display_name, retrieve_rides_by_driver_id, retrieve_ride_by_ride_id, update_ride_by_id
 from services.sse_service import publish_ride_request
 from services.notification_targets import register_push_token, has_push_tokens
 from schemas.notification import PushTokenRegister
@@ -952,13 +952,15 @@ async def retrieve_ride_details(
     Access: Driver only (valid driver access token required).
     """
     ride = await retrieve_ride_by_ride_id(id=ride_id)
-    
-    if not ride:
+
+    # Only the ride's own driver may read it; anyone else gets the same answer as for a missing ride.
+    if not ride or ride.driverId != token.userId:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ride not found"
         )
-    
+    ride.riderName = await rider_display_name(ride.userId)
+
     return APIResponse(
         status_code=200,
         data=ride,

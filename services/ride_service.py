@@ -129,6 +129,17 @@ def _place_coordinates(place: Any) -> tuple[Optional[float], Optional[float]]:
     return getattr(place, "latitude", None), getattr(place, "longitude", None)
 
 
+async def rider_display_name(rider_id: str) -> Optional[str]:
+    """First name and last initial, which is all a driver is shown of a rider."""
+    if not ObjectId.is_valid(rider_id):
+        return None
+    rider = await get_rider({"_id": ObjectId(rider_id)})
+    if not rider:
+        return None
+    first, last = (rider.firstName or "").strip(), (rider.lastName or "").strip()
+    return f"{first} {last[:1]}." if first and last else (first or None)
+
+
 async def _ride_request_details(ride: RideOut) -> dict:
     """What a driver needs to judge an offer: who is riding, where exactly, how far and how long."""
     details: dict[str, Any] = {}
@@ -142,10 +153,7 @@ async def _ride_request_details(ride: RideOut) -> dict:
     if ride.map:
         details.update(distanceMeters=ride.map.totalDistanceMeters, durationSeconds=ride.map.totalDurationSeconds)
     try:
-        rider = await get_rider({"_id": ObjectId(ride.userId)})
-        if rider:
-            first, last = (rider.firstName or "").strip(), (rider.lastName or "").strip()
-            details["riderName"] = f"{first} {last[:1]}." if first and last else (first or None)
+        details["riderName"] = await rider_display_name(ride.userId)
         summary = await get_user_rating_summary(ride.userId)
         if summary.totalRides:
             details.update(riderRating=round(summary.avgRating, 2), riderRatingCount=summary.totalRides)
