@@ -916,8 +916,10 @@ async def create_a_ride_for_user(
 
     Access: Admin only (valid admin access token required).
     """
-    pick_up = await get_place_details(place_id=ride_data.pickup.place_id)
-    drop_off = await get_place_details(place_id=ride_data.destination.place_id)
+    # RideBase allows a place as either a RidePlace or a bare place id.
+    place_id_of = lambda place: place if isinstance(place, str) else place.place_id
+    pick_up = await get_place_details(place_id=place_id_of(ride_data.pickup))
+    drop_off = await get_place_details(place_id=place_id_of(ride_data.destination))
     if pick_up.data==None or drop_off.data==None:
         raise HTTPException(status_code=500, detail="pickup or dropoff details fetching failed")
     origin = (pick_up.data["lat"],pick_up.data["lng"])
