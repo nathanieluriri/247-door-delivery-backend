@@ -400,6 +400,8 @@ async def logout_rider(token: accessTokenOut = Depends(verify_token_rider_role))
 
 @router.patch(
     "/profile",
+    response_model_exclude={"data": {"password"}},
+    response_model=APIResponse[RiderOut],
     summary="Update rider profile",
     description="Updates the authenticated rider profile fields.",
 )
@@ -718,7 +720,7 @@ async def ride_history(token:accessTokenOut = Depends(verify_token_rider_role)):
 @router.post(
     "/ride/request",
     response_model_exclude_none=True,
-    dependencies=[Depends(verify_token_rider_role), Depends(check_rider_rating_gate)],
+    dependencies=[Depends(verify_token_rider_role), Depends(check_rider_account_status), Depends(check_rider_rating_gate)],
     response_model=APIResponse[RideOut],
     summary="Request a ride",
     description="Creates a new ride request after calculating fare and route details.",

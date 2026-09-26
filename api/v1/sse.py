@@ -71,6 +71,9 @@ async def check_driver_sse_stream_eligibility(
     Access: Driver only (valid driver access token required).
     """
     status = await get_driver_sse_eligibility_status(token)
+    driver = status.get("driver")
+    if driver is not None:
+        status = {**status, "driver": driver.model_dump(exclude={"password"})}
     return APIResponse(status_code=200, data=status, detail="SSE eligibility checked")
 
 

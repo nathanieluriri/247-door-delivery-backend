@@ -293,6 +293,8 @@ async def delete_admin_account(
 @router.patch(
     "/profile",
     dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
+    response_model_exclude={"data": {"password"}},
+    response_model=APIResponse[AdminOut],
     summary="Update admin profile",
     description="Updates the authenticated admin profile fields.",
 )
