@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, status, Path
 from typing import List, Optional
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from schemas.imports import PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
+from schemas.imports import AccountStatus, PayoutOptions, ResetPasswordConclusion, ResetPasswordInitiation, ResetPasswordInitiationResponse, RideStatus
 from schemas.rating import RatingBase, RatingCreate
 from schemas.response_schema import APIResponse
 from core.staff_payment import StaffPaymentService, get_staff_payment_service
@@ -34,6 +34,7 @@ from services.payout_service import (
 
 from schemas.driver import (
     DriverCreate,
+    DriverSignup,
     DriverOut,
     DriverBase,
     DriverUpdate,
@@ -332,14 +333,14 @@ async def get_driver_details(token:accessTokenOut = Depends(verify_token_driver_
     summary="Register driver",
     description="Creates a new driver account using email and password.",
 )
-async def signup_new_driver(user_data:DriverCreate):
+async def signup_new_driver(user_data:DriverSignup):
     """
     Register a new driver account.
 
     Access: Public (no auth).
     """
-    if len(user_data.password)<8:
-        raise HTTPException(status_code=401,detail="Password too short")
+    # A new driver always waits for document review and admin approval.
+    user_data.accountStatus = AccountStatus.PENDING_VERIFICATION
     items = await add_driver(driver_data=user_data)
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
