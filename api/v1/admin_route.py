@@ -60,6 +60,7 @@ from schemas.imports import *
 from security.auth import verify_token,verify_token_to_refresh,verify_admin_token
 from services.driver_service import retrieve_driver_by_driver_id, retrieve_drivers
 from services.rider_service import retrieve_rider_by_rider_id, retrieve_riders
+from services.account_stats import attach_account_stats
 from fastapi.routing import APIRoute
 
  
@@ -391,7 +392,7 @@ async def list_of_drivers(start:int= 0, stop:int=100,token:accessTokenOut = Depe
 
     Access: Admin only (valid admin access token required).
     """
-    items = await retrieve_drivers(start=start,stop=stop)
+    items = await attach_account_stats(await retrieve_drivers(start=start,stop=stop), "driverId")
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 @router.get(
@@ -740,7 +741,7 @@ async def list_riders(start:int= 0, stop:int=100,token:accessTokenOut = Depends(
 
     Access: Admin only (valid admin access token required).
     """
-    items = await retrieve_riders(start=0,stop=100)
+    items = await attach_account_stats(await retrieve_riders(start=start,stop=stop), "userId")
     return APIResponse(status_code=200, data=items, detail="Fetched successfully")
 
 

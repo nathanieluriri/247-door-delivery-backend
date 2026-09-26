@@ -114,6 +114,9 @@ class RiderOut(RiderBase):
     lastName:Optional[str]='' 
     phoneNumber: Optional[str] = None
     accountStatus:Optional[AccountStatus]=AccountStatus.ACTIVE
+    rating: Optional[float] = None
+    ratingCount: Optional[int] = None
+    completedRides: Optional[int] = None
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),

@@ -212,6 +212,9 @@ class DriverOut(DriverBase):
     vehicleYear: Optional[int] = None
     profileComplete: bool = Field(default=False, alias="profileComplete")
     accountStatus:Optional[AccountStatus]=AccountStatus.PENDING_VERIFICATION
+    rating: Optional[float] = None
+    ratingCount: Optional[int] = None
+    completedRides: Optional[int] = None
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),
