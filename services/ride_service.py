@@ -123,6 +123,12 @@ def _format_place_for_dispatch(place: Any) -> str:
 
 
 
+def _place_name(place: Any) -> Optional[str]:
+    if isinstance(place, dict):
+        return place.get("name")
+    return getattr(place, "name", None)
+
+
 def _place_coordinates(place: Any) -> tuple[Optional[float], Optional[float]]:
     if isinstance(place, dict):
         return place.get("latitude"), place.get("longitude")
@@ -150,8 +156,13 @@ async def _ride_request_details(ride: RideOut) -> dict:
         details.update(pickupLatitude=lat, pickupLongitude=lng)
     lat, lng = _place_coordinates(ride.destination)
     details.update(destinationLatitude=lat, destinationLongitude=lng)
+    details.update(pickupName=_place_name(ride.pickup), destinationName=_place_name(ride.destination))
     if ride.map:
-        details.update(distanceMeters=ride.map.totalDistanceMeters, durationSeconds=ride.map.totalDurationSeconds)
+        details.update(
+            distanceMeters=ride.map.totalDistanceMeters,
+            durationSeconds=ride.map.totalDurationSeconds,
+            encodedPolyline=ride.map.encodedPolyline,
+        )
     try:
         details["riderName"] = await rider_display_name(ride.userId)
         summary = await get_user_rating_summary(ride.userId)

@@ -91,6 +91,9 @@ class RideRequestEvent(BaseModel):
     destination_longitude: Optional[float] = Field(default=None, alias="destinationLongitude")
     distance_meters: Optional[int] = Field(default=None, alias="distanceMeters")
     duration_seconds: Optional[int] = Field(default=None, alias="durationSeconds")
+    pickup_name: Optional[str] = Field(default=None, alias="pickupName")
+    destination_name: Optional[str] = Field(default=None, alias="destinationName")
+    encoded_polyline: Optional[str] = Field(default=None, alias="encodedPolyline")
 
     model_config = {"populate_by_name": True}
 
