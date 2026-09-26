@@ -32,6 +32,8 @@ class AddressBase(BaseModel):
 class AddressCreate(AddressBase):
     # Add other fields here
     userId:str 
+    name: Optional[str] = None
+    formattedAddress: Optional[str] = None
     date_created: int = Field(default_factory=lambda: int(time.time()))
     last_updated: int = Field(default_factory=lambda: int(time.time()))
 
@@ -44,6 +46,8 @@ class AddressUpdate(BaseModel):
 class AddressOut(AddressBase):
     # Add other fields here 
     userId:str
+    name: Optional[str] = None
+    formattedAddress: Optional[str] = None
     id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("_id", "id"),
