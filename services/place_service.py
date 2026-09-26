@@ -308,8 +308,14 @@ async def get_reverse_geocode(latitude: float, longitude: float, country: str | 
 
 
 def calculate_fare_using_vehicle_config_and_distance(vehicle: Vehicle, distance: float, time: float) -> float:
+    """Fare in pounds for a trip of `distance` metres taking `time` seconds.
+
+    The vehicle rates apply to raw metres and seconds and add up to tenths of a penny, which is
+    what riders have always been charged; dividing by 1000 gives the same amount in pounds.
+    """
     v = vehicle.value
-    return v.base_fare + (v.distance_rate * distance) + (v.time_rate * time)
+    tenths_of_a_penny = v.base_fare + (v.distance_rate * distance) + (v.time_rate * time)
+    return round(tenths_of_a_penny / 1000, 2)
 
 
 async def nearby_drivers(pickup_lat: float, pickup_lon: float) -> Union[Literal[0], int]:

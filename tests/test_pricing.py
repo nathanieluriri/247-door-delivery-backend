@@ -9,6 +9,7 @@ def test_pricing_uses_server_side_values():
         distance=10_000,
         time=600,
     )
-    # Base 4 + distance_rate*10000 + time_rate*600
-    expected = Vehicle.CAR.value.base_fare + (Vehicle.CAR.value.distance_rate * 10_000) + (Vehicle.CAR.value.time_rate * 600)
-    assert fare == expected
+    # Base 4 + distance_rate*10000 + time_rate*600, in tenths of a penny, returned in pounds
+    tenths = Vehicle.CAR.value.base_fare + (Vehicle.CAR.value.distance_rate * 10_000) + (Vehicle.CAR.value.time_rate * 600)
+    assert fare == round(tenths / 1000, 2)
+    assert fare == 20.24

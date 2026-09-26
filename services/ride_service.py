@@ -201,7 +201,7 @@ async def _maybe_create_payout_for_completed_ride(ride: RideOut) -> None:
             return
         payout_record = PayoutCreate(
             payoutOption=PayoutOptions.totalEarnings,
-            amount=float(ride.price),
+            amount=int(round(float(ride.price) * 100)),
             driverId=ride.driverId,
             rideIds=[ride.id],
         )
@@ -936,7 +936,7 @@ async def update_ride_by_id(
                             detail="Ride price is missing for refund",
                         )
 
-                    unit_amount = int(ride.price / 10)
+                    unit_amount = int(round(ride.price * 100))
                     refund_amount = int(
                         Decimal(unit_amount) * Decimal(str(refund_percentage))
                     )
@@ -1084,7 +1084,7 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
                 payment_service = get_payment_service()
                 if ride.price is None:
                     raise HTTPException(status_code=400, detail="Ride price is missing for refund")
-                unit_amount = int(ride.price / 10)
+                unit_amount = int(round(ride.price * 100))
                 if not ride.checkoutSessionObject or not ride.checkoutSessionObject.payment_intent:
                     raise HTTPException(status_code=400, detail="Missing payment intent for refund")
                 refund_amount = int(Decimal(unit_amount) * Decimal("0.95"))
