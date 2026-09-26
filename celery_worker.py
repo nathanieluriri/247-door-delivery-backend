@@ -1,10 +1,16 @@
 import os
+import sys
 from celery import Celery
 from dotenv import load_dotenv
 import celery_aio_pool as aio_pool
 
 
 load_dotenv()
+
+# Celery puts the working directory on sys.path while it loads this module and takes it off
+# again afterwards, so the lazy imports inside tasks (core.tasks and the services it reaches)
+# could not find the project. A second entry of our own survives that removal.
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 broker_url = os.getenv("CELERY_BROKER_URL")
 backend_url = os.getenv("CELERY_RESULT_BACKEND")
