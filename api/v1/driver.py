@@ -1287,36 +1287,6 @@ async def list_previous_payouts(
 # Retrieve a single Payout
 # ------------------------------
 @router.get(
-    "/payout/{id}",
-    response_model=APIResponse[PayoutOut],
-    summary="Get payout by ID",
-    description="Fetches a single payout record by its ID.",
-)
-async def view_information_regarding_a_previous_payout(
-    
-    id: str = Path(..., description="payout ID to fetch specific item"),
-    
-    token:accessTokenOut = Depends(verify_token_driver_role)
-    
-):
-    """
-    Retrieves a single Payout by its ID.
-
-    Access: Driver only (valid driver access token required).
-    """
-    item = await retrieve_payout_by_payout_id(id=id,driverId=token.userId)
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
-    
-    return APIResponse(status_code=200, data=item, detail="payout item fetched")
-
-
-
- 
-
-
-
-@router.get(
     "/payout/balance",
     response_model=APIResponse[PayoutBalanceOut],
     summary="Get payout balance",
@@ -1354,6 +1324,36 @@ async def get_driver_available_balance(token: accessTokenOut = Depends(verify_to
 # ------------------------------
 # Request Payout (Transfer to provider balance)
 # ------------------------------
+@router.get(
+    "/payout/{id}",
+    response_model=APIResponse[PayoutOut],
+    summary="Get payout by ID",
+    description="Fetches a single payout record by its ID.",
+)
+async def view_information_regarding_a_previous_payout(
+    
+    id: str = Path(..., description="payout ID to fetch specific item"),
+    
+    token:accessTokenOut = Depends(verify_token_driver_role)
+    
+):
+    """
+    Retrieves a single Payout by its ID.
+
+    Access: Driver only (valid driver access token required).
+    """
+    item = await retrieve_payout_by_payout_id(id=id,driverId=token.userId)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payout not found")
+    
+    return APIResponse(status_code=200, data=item, detail="payout item fetched")
+
+
+
+ 
+
+
+
 @router.post(
     "/payout/request",
     response_model=APIResponse[PayoutOut],

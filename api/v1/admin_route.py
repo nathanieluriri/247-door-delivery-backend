@@ -975,7 +975,7 @@ async def get_rides_for_a_particular_rider(
 
 
 @router.get(
-    "/ride/{driverId}",
+    "/ride/driver/{driverId}",
     dependencies=[Depends(verify_admin_token), Depends(log_what_admin_does), Depends(check_admin_account_status_and_permissions)],
     response_model_exclude_none=True,
     response_model_exclude={"data": {"password"}},

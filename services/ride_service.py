@@ -636,9 +636,8 @@ async def retrieve_rides_by_driver_id(driver_id: str) -> List[RideOut]:
 
     filter_dict = {"driverId": driver_id}
     result = await get_rides(filter_dict)
-
     if not result:
-        raise HTTPException(status_code=404, detail="Ride not found")
+        return []
 
     return await _enrich_rides_with_driver_snapshot(result)
 
