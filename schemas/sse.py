@@ -59,6 +59,7 @@ class RideStatusUpdate(BaseModel):
     reason_code: Optional[str] = Field(default=None, alias="reasonCode")
     driver_snapshot: Optional[DriverSnapshot] = Field(default=None, alias="driverSnapshot")
     rating_status: Optional[RideRatingStatus] = Field(default=None, alias="ratingStatus")
+    payment_link: Optional[str] = Field(default=None, alias="paymentLink")
 
     model_config = {"populate_by_name": True}
 

@@ -1048,6 +1048,7 @@ async def update_ride_by_id(
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
                 rating_status=result.ratingStatus,
+                payment_link=result.paymentLink if ride_data.rideStatus == RideStatus.awaitingPayment else None,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
@@ -1178,6 +1179,7 @@ async def update_ride_by_id_admin_func(ride_id: str, ride_data: RideUpdate ) -> 
                 driver_id=result.driverId,
                 message=f"Ride status changed to {ride_data.rideStatus.value}",
                 rating_status=result.ratingStatus,
+                payment_link=result.paymentLink if ride_data.rideStatus == RideStatus.awaitingPayment else None,
             )
         except Exception as e:
             print(f"Warning: Failed to emit SSE update for ride {ride_id}: {e}")
